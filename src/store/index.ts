@@ -16,7 +16,15 @@ import {
   COMPOUND_BORROW_TOPIC, COMPOUND_REPAY_TOPIC,
   AMM_BURN_TOPIC, UNI_V3_POOL_MINT_TOPIC,
   UNI_V3_INCREASE_LIQ_TOPIC, UNI_V3_DECREASE_LIQ_TOPIC, UNI_V3_COLLECT_TOPIC,
+  BALANCER_SWAP_TOPIC,
+  MORPHO_SUPPLY_TOPIC, MORPHO_SUPPLY_COLLATERAL_TOPIC,
+  MORPHO_BORROW_TOPIC, MORPHO_REPAY_TOPIC,
+  MORPHO_WITHDRAW_TOPIC, MORPHO_WITHDRAW_COLLATERAL_TOPIC, MORPHO_LIQUIDATE_TOPIC,
+  EULER_DEPOSIT_TOPIC, EULER_WITHDRAW_TOPIC, EULER_BORROW_TOPIC, EULER_REPAY_TOPIC,
+  COMPOUND3_SUPPLY_TOPIC, COMPOUND3_WITHDRAW_TOPIC, COMPOUND3_ABSORB_TOPIC,
   AERODROME_ADDRESSES, UNISWAP_V3_ADDRESSES,
+  MORPHO_BLUE_ADDRESS, BALANCER_VAULT_ADDRESS,
+  SEAMLESS_POOL_ADDRESS, AAVE_V3_POOL_ADDRESS, COMPOUND3_ADDRESSES,
 } from '../lib/protocols'
 import {
   hexToBigInt, hexToNumber, getSelector,
@@ -38,8 +46,58 @@ function detectProtocolHint(txTo: string | null): ProtocolHint {
   return null
 }
 
-function processLogs(logs: Log[], hint: ProtocolHint = null): { tokenFlows: TokenFlow[]; protocols: ProtocolEvent[] } {
-  // When hint is 'aerodrome', V3-style events (same ABI as Uniswap V3) come from Aerodrome Slipstream pools
+// Look up pool factory for every V3 swap log address, fetching any not already cached.
+// Returns a pool-address → protocol-name map and any newly fetched PoolMeta entries.
+async function fetchV3PoolProtocols(
+  client: RpcClient,
+  rawLogs: RawLog[],
+  poolCache: Map<string, PoolMeta | 'loading' | 'error'>,
+): Promise<{ protocols: Map<string, string>; newMeta: Map<string, PoolMeta> }> {
+  const v3Pools = new Set<string>()
+  for (const log of rawLogs) {
+    const t0 = log.topics[0]?.toLowerCase()
+    // Include both V3-style and V2-style swap/LP pools — factory lookup disambiguates both
+    if (t0 === UNI_V3_SWAP_TOPIC || t0 === UNI_V3_POOL_MINT_TOPIC || t0 === AMM_SWAP_TOPIC || t0 === AMM_BURN_TOPIC) {
+      v3Pools.add(log.address.toLowerCase())
+    }
+  }
+
+  const protocols = new Map<string, string>()
+  const toFetch: string[] = []
+
+  for (const addr of v3Pools) {
+    const cached = poolCache.get(addr)
+    if (cached && typeof cached === 'object') {
+      protocols.set(addr, cached.protocol)
+    } else if (!cached) {
+      toFetch.push(addr)
+    }
+    // 'loading' or 'error' → skip, falls back to hint
+  }
+
+  const newMeta = new Map<string, PoolMeta>()
+  if (toFetch.length > 0) {
+    const results = await Promise.all(
+      toFetch.map((addr) => fetchPoolMeta(client, addr).catch(() => null))
+    )
+    for (let i = 0; i < toFetch.length; i++) {
+      const meta = results[i]
+      if (meta) {
+        protocols.set(toFetch[i], meta.protocol)
+        newMeta.set(toFetch[i], meta)
+      }
+    }
+  }
+
+  return { protocols, newMeta }
+}
+
+function processLogs(
+  logs: Log[],
+  hint: ProtocolHint = null,
+  poolProtocols: Map<string, string> = new Map(),
+): { tokenFlows: TokenFlow[]; protocols: ProtocolEvent[] } {
+  // Hint is used as fallback for pools not in poolProtocols (e.g. non-swap V3 events)
   const clProtocol = hint === 'aerodrome' ? 'Aerodrome' : 'Uniswap V3'
   const tokenFlows: TokenFlow[] = []
   const protocols: ProtocolEvent[] = []
@@ -57,10 +115,10 @@ function processLogs(logs: Log[], hint: ProtocolHint = null): { tokenFlows: Toke
       })
     }
 
-    // V3-style Swap (Uniswap V3 or Aerodrome Slipstream — disambiguated by clProtocol)
+    // V3-style Swap — disambiguated by pool factory lookup; falls back to hint
     if (t0 === UNI_V3_SWAP_TOPIC) {
       protocols.push({
-        protocol: clProtocol, action: 'Swap',
+        protocol: poolProtocols.get(log.address) ?? clProtocol, action: 'Swap',
         extra: {
           pool:    log.address,
           amount0: decodeInt256(log.data, 0).toString(),
@@ -69,54 +127,59 @@ function processLogs(logs: Log[], hint: ProtocolHint = null): { tokenFlows: Toke
       })
     }
 
-    // Aerodrome classic AMM swap (always Aerodrome)
+    // V2-style AMM Swap — factory lookup disambiguates (Aerodrome, PancakeSwap V2, SushiSwap V2, etc.)
     if (t0 === AMM_SWAP_TOPIC) {
       protocols.push({
-        protocol: 'Aerodrome', action: 'Swap',
+        protocol: poolProtocols.get(log.address) ?? 'Aerodrome', action: 'Swap',
         extra: { pool: log.address },
       })
     }
 
-    // Aave V3 Supply
+    // Aave V3 Supply (also Seamless Protocol — disambiguated by pool address)
     if (t0 === AAVE_SUPPLY_TOPIC && log.topics[1]) {
+      const aaveProtocol = log.address === SEAMLESS_POOL_ADDRESS ? 'Seamless' : 'Aave V3'
       protocols.push({
-        protocol: 'Aave V3', action: 'Supply',
+        protocol: aaveProtocol, action: 'Supply',
         token:  topicToAddress(log.topics[1]),
         amount: decodeUint256(log.data, 1),
       })
     }
 
-    // Aave V3 Withdraw
+    // Aave V3 Withdraw (also Seamless)
     if (t0 === AAVE_WITHDRAW_TOPIC && log.topics[1]) {
+      const aaveProtocol = log.address === SEAMLESS_POOL_ADDRESS ? 'Seamless' : 'Aave V3'
       protocols.push({
-        protocol: 'Aave V3', action: 'Withdraw',
+        protocol: aaveProtocol, action: 'Withdraw',
         token:  topicToAddress(log.topics[1]),
         amount: decodeUint256(log.data, 0),
       })
     }
 
-    // Aave V3 Borrow
+    // Aave V3 Borrow (also Seamless)
     if (t0 === AAVE_BORROW_TOPIC && log.topics[1]) {
+      const aaveProtocol = log.address === SEAMLESS_POOL_ADDRESS ? 'Seamless' : 'Aave V3'
       protocols.push({
-        protocol: 'Aave V3', action: 'Borrow',
+        protocol: aaveProtocol, action: 'Borrow',
         token:  topicToAddress(log.topics[1]),
         amount: decodeUint256(log.data, 1),
       })
     }
 
-    // Aave V3 Repay
+    // Aave V3 Repay (also Seamless)
     if (t0 === AAVE_REPAY_TOPIC && log.topics[1]) {
+      const aaveProtocol = log.address === SEAMLESS_POOL_ADDRESS ? 'Seamless' : 'Aave V3'
       protocols.push({
-        protocol: 'Aave V3', action: 'Repay',
+        protocol: aaveProtocol, action: 'Repay',
         token:  topicToAddress(log.topics[1]),
         amount: decodeUint256(log.data, 0),
       })
     }
 
-    // Aave V3 Liquidation
+    // Aave V3 Liquidation (also Seamless)
     if (t0 === AAVE_LIQUIDATION_TOPIC && log.topics[1] && log.topics[2]) {
+      const aaveProtocol = log.address === SEAMLESS_POOL_ADDRESS ? 'Seamless' : 'Aave V3'
       protocols.push({
-        protocol: 'Aave V3', action: 'Liquidation',
+        protocol: aaveProtocol, action: 'Liquidation',
         token:   topicToAddress(log.topics[1]),
         token2:  topicToAddress(log.topics[2]),
         amount:  decodeUint256(log.data, 0),
@@ -124,13 +187,57 @@ function processLogs(logs: Log[], hint: ProtocolHint = null): { tokenFlows: Toke
       })
     }
 
+    // Balancer V2 — single vault, poolId is topics[1]
+    if (t0 === BALANCER_SWAP_TOPIC && log.address === BALANCER_VAULT_ADDRESS) {
+      protocols.push({ protocol: 'Balancer V2', action: 'Swap' })
+    }
+
+    // Morpho Blue — fixed address, all market events
+    if (log.address === MORPHO_BLUE_ADDRESS) {
+      if (t0 === MORPHO_SUPPLY_TOPIC) {
+        protocols.push({ protocol: 'Morpho Blue', action: 'Supply', amount: decodeUint256(log.data, 0) })
+      } else if (t0 === MORPHO_SUPPLY_COLLATERAL_TOPIC) {
+        protocols.push({ protocol: 'Morpho Blue', action: 'Supply', amount: decodeUint256(log.data, 0) })
+      } else if (t0 === MORPHO_BORROW_TOPIC) {
+        protocols.push({ protocol: 'Morpho Blue', action: 'Borrow', amount: decodeUint256(log.data, 0) })
+      } else if (t0 === MORPHO_REPAY_TOPIC) {
+        protocols.push({ protocol: 'Morpho Blue', action: 'Repay', amount: decodeUint256(log.data, 0) })
+      } else if (t0 === MORPHO_WITHDRAW_TOPIC) {
+        protocols.push({ protocol: 'Morpho Blue', action: 'Withdraw', amount: decodeUint256(log.data, 0) })
+      } else if (t0 === MORPHO_WITHDRAW_COLLATERAL_TOPIC) {
+        protocols.push({ protocol: 'Morpho Blue', action: 'Withdraw', amount: decodeUint256(log.data, 0) })
+      } else if (t0 === MORPHO_LIQUIDATE_TOPIC) {
+        protocols.push({ protocol: 'Morpho Blue', action: 'Liquidation', amount: decodeUint256(log.data, 0) })
+      }
+    }
+
+    // Euler V2 EVaults — Borrow/Repay are vault-specific; Deposit/Withdraw are ERC-4626
+    // Only capture Borrow/Repay (unambiguous); skip Deposit/Withdraw (shared with many protocols)
+    if (t0 === EULER_BORROW_TOPIC) {
+      protocols.push({ protocol: 'Euler', action: 'Borrow', amount: decodeUint256(log.data, 0) })
+    }
+    if (t0 === EULER_REPAY_TOPIC) {
+      protocols.push({ protocol: 'Euler', action: 'Repay', amount: decodeUint256(log.data, 0) })
+    }
+
+    // Compound V3 (Comet) — check against known market addresses
+    if (COMPOUND3_ADDRESSES.has(log.address)) {
+      if (t0 === COMPOUND3_SUPPLY_TOPIC) {
+        protocols.push({ protocol: 'Compound V3', action: 'Supply', amount: decodeUint256(log.data, 0) })
+      } else if (t0 === COMPOUND3_WITHDRAW_TOPIC) {
+        protocols.push({ protocol: 'Compound V3', action: 'Withdraw', amount: decodeUint256(log.data, 0) })
+      } else if (t0 === COMPOUND3_ABSORB_TOPIC) {
+        protocols.push({ protocol: 'Compound V3', action: 'Liquidation', amount: decodeUint256(log.data, 0) })
+      }
+    }
+
     // Mint(address,uint256,uint256) is shared between Compound/Moonwell cTokens and Uni V2/Aerodrome pools.
     // Disambiguate: AMM pools index the sender address → topics.length >= 2; cToken Mint has no indexed params.
     if (t0 === COMPOUND_MINT_TOPIC) {
       if (log.topics.length >= 2) {
-        // Aerodrome / Uni V2 AMM pool: AddLiquidity
+        // V2-style AMM pool AddLiquidity — factory lookup disambiguates protocol
         protocols.push({
-          protocol: 'Aerodrome', action: 'AddLiquidity',
+          protocol: poolProtocols.get(log.address) ?? 'Aerodrome', action: 'AddLiquidity',
           extra: { pool: log.address },
         })
       } else {
@@ -142,18 +249,18 @@ function processLogs(logs: Log[], hint: ProtocolHint = null): { tokenFlows: Toke
       }
     }
 
-    // Aerodrome / Uni V2 AMM LP Burn (RemoveLiquidity)
+    // V2-style AMM LP Burn (RemoveLiquidity) — factory lookup disambiguates protocol
     if (t0 === AMM_BURN_TOPIC) {
       protocols.push({
-        protocol: 'Aerodrome', action: 'RemoveLiquidity',
+        protocol: poolProtocols.get(log.address) ?? 'Aerodrome', action: 'RemoveLiquidity',
         extra: { pool: log.address },
       })
     }
 
-    // V3-style pool Mint (Uniswap V3 or Aerodrome Slipstream) — topics = [sig, owner, tickLower, tickUpper]
+    // V3-style pool Mint — disambiguated by pool factory lookup; falls back to hint
     if (t0 === UNI_V3_POOL_MINT_TOPIC) {
       protocols.push({
-        protocol: clProtocol, action: 'AddLiquidity',
+        protocol: poolProtocols.get(log.address) ?? clProtocol, action: 'AddLiquidity',
         extra: { pool: log.address },
       })
     }
@@ -222,7 +329,12 @@ function rawLogToLog(raw: RawLog): Log {
   }
 }
 
-function processBlock(raw: RawBlock, rawLogs: RawLog[], rawReceipts: RawReceipt[] | null): Block {
+function processBlock(
+  raw: RawBlock,
+  rawLogs: RawLog[],
+  rawReceipts: RawReceipt[] | null,
+  poolProtocols: Map<string, string> = new Map(),
+): Block {
   const logsByTx = new Map<string, Log[]>()
   for (const rl of rawLogs) {
     if (rl.removed) continue
@@ -242,7 +354,7 @@ function processBlock(raw: RawBlock, rawLogs: RawLog[], rawReceipts: RawReceipt[
     const hash = rawTx.hash.toLowerCase()
     const logs = logsByTx.get(hash) ?? []
     const hint = detectProtocolHint(rawTx.to)
-    const { tokenFlows, protocols } = processLogs(logs, hint)
+    const { tokenFlows, protocols } = processLogs(logs, hint, poolProtocols)
     const value = hexToBigInt(rawTx.value)
     const gasUsed = gasUsedByTx.get(hash)
     const maxPriorityFeePerGas = rawTx.maxPriorityFeePerGas
@@ -417,7 +529,18 @@ export const useStore = create<Store>((set, get) => ({
           client.call<RawLog[]>('eth_getLogs',          [{ fromBlock: hexN, toBlock: hexN }]),
           client.call<RawReceipt[]>('eth_getBlockReceipts', [hexN]).catch(() => null),
         ])
-        if (raw) get().addBlock(processBlock(raw, rawLogs ?? [], rawReceipts))
+        if (raw) {
+          const logs = rawLogs ?? []
+          const { protocols: poolProtocols, newMeta } = await fetchV3PoolProtocols(client, logs, get().poolCache)
+          if (newMeta.size > 0) {
+            set((s) => {
+              const c = new Map(s.poolCache)
+              for (const [addr, meta] of newMeta) c.set(addr, meta)
+              return { poolCache: c }
+            })
+          }
+          get().addBlock(processBlock(raw, logs, rawReceipts, poolProtocols))
+        }
       } catch (e) {
         console.warn(`Block ${n} fetch failed:`, e)
       }
@@ -448,7 +571,16 @@ export const useStore = create<Store>((set, get) => ({
               client.call<RawReceipt[]>('eth_getBlockReceipts', [hexN]).catch(() => null),
             ])
             if (raw) {
-              const block = processBlock(raw, rawLogs ?? [], rawReceipts)
+              const logs = rawLogs ?? []
+              const { protocols: poolProtocols, newMeta } = await fetchV3PoolProtocols(client, logs, get().poolCache)
+              if (newMeta.size > 0) {
+                set((s) => {
+                  const c = new Map(s.poolCache)
+                  for (const [addr, meta] of newMeta) c.set(addr, meta)
+                  return { poolCache: c }
+                })
+              }
+              const block = processBlock(raw, logs, rawReceipts, poolProtocols)
               get().addBlock(block)
               set({ latestBlock: block.number })
             }
@@ -480,7 +612,18 @@ export const useStore = create<Store>((set, get) => ({
         client.call<RawLog[]>('eth_getLogs', [{ fromBlock: hexN, toBlock: hexN }]),
         client.call<RawReceipt[]>('eth_getBlockReceipts', [hexN]).catch(() => null),
       ])
-      if (raw) get().addBlock(processBlock(raw, rawLogs ?? [], rawReceipts))
+      if (raw) {
+        const logs = rawLogs ?? []
+        const { protocols: poolProtocols, newMeta } = await fetchV3PoolProtocols(client, logs, get().poolCache)
+        if (newMeta.size > 0) {
+          set((s) => {
+            const c = new Map(s.poolCache)
+            for (const [addr, meta] of newMeta) c.set(addr, meta)
+            return { poolCache: c }
+          })
+        }
+        get().addBlock(processBlock(raw, logs, rawReceipts, poolProtocols))
+      }
     } catch (e) {
       console.warn(`Block ${blockNumber} fetch failed:`, e)
     }
@@ -637,11 +780,11 @@ export const useStore = create<Store>((set, get) => ({
             const [allState, diffState, callTrace] = await Promise.all([
               client.call<PrestateResult>(
                 'debug_traceTransaction', [hash, { tracer: 'prestateTracer' }]
-              ),
+              ).catch(() => null),
               client.call<PrestateDiffResult>(
                 'debug_traceTransaction',
                 [hash, { tracer: 'prestateTracer', tracerConfig: { diffMode: true } }]
-              ),
+              ).catch(() => null),
               client.call<CallTrace>(
                 'debug_traceTransaction', [hash, { tracer: 'callTracer' }]
               ).catch(() => null),

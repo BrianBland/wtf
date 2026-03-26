@@ -31,28 +31,52 @@ export const KNOWN_PROTOCOLS: Record<string, ProtocolInfo> = {
   '0x33128a8fc17869897dce68ed026d694621f6fdfd': { name: 'Uniswap V3 Factory', type: 'dex' },
   '0x198ef1ec325a96cc354c7266a038be8b5c558f67': { name: 'Uniswap V3 NftPM',   type: 'dex' },
   '0x03a520b32c04bf3beef7beb72e919cf822ed34f1': { name: 'Uniswap V3 NftPM2',  type: 'dex' },
+  '0x3fc91a3afd70395cd496c647d5a6cc9d4b2b7fad': { name: 'Uniswap Universal Router', type: 'dex' },
   // Aerodrome (classic AMM + Slipstream CL)
   '0xcf77a3ba9a5ca399b7c97c74d54e5b1beb874e43': { name: 'Aerodrome Router',         type: 'dex' },
-  '0x420dd381b31aef6683db6b902084cb0ffece40da': { name: 'Aerodrome Factory',        type: 'dex' },
-  '0x827922686190fd9b3eb5c2af8154a8ab3efb61d5': { name: 'Aerodrome Voter',          type: 'dex' },
-  '0x5e7bb104d84c7cb9b682aac2f3d509f5f406809a': { name: 'Aerodrome CL Factory',     type: 'dex' },
-  '0xbe6d8f0d05cc4be24d5167a3ef062215be6d18a5': { name: 'Aerodrome CL SwapRouter',  type: 'dex' },
+  '0x420dd381b31aef6683db6b902084cb0ffece40da': { name: 'Aerodrome Factory',         type: 'dex' },
+  '0x827922686190fd9b3eb5c2af8154a8ab3efb61d5': { name: 'Aerodrome Voter',           type: 'dex' },
+  '0x5e7bb104d84c7cb9b682aac2f3d509f5f406809a': { name: 'Aerodrome CL Factory',      type: 'dex' },
+  '0xbe6d8f0d05cc4be24d5167a3ef062215be6d18a5': { name: 'Aerodrome CL SwapRouter',   type: 'dex' },
+  // PancakeSwap
+  '0x678aa4bf4e210cf2166753e054d5b7c31cc7fa86': { name: 'PancakeSwap V3 Router',     type: 'dex' },
+  '0x0bfbcf9fa4f9c56b0f40a671ad40e0805a091865': { name: 'PancakeSwap V3 Factory',    type: 'dex' },
+  '0x02a84c1b3bbd7401a5f7fa98a384ebc70bb5749e': { name: 'PancakeSwap V2 Factory',    type: 'dex' },
+  // SushiSwap
+  '0xc35dadb65012ec5796536bd9864ed8773abc74c4': { name: 'SushiSwap V3 Factory',      type: 'dex' },
+  '0x71524b4f93c58fcbf659783284e38825f0622859': { name: 'SushiSwap V2 Factory',      type: 'dex' },
+  // BaseSwap
+  '0xaed85e1d0c7e6e18335b9ea858ce1ab06934eab5': { name: 'BaseSwap V3 Factory',       type: 'dex' },
+  '0xfda619b6d20975be80a10332cd39b9a4b0faa8bb': { name: 'BaseSwap V2 Factory',       type: 'dex' },
+  // Balancer V2
+  '0xba12222222228d8ba445958a75a0704d566bf2c8': { name: 'Balancer V2 Vault',         type: 'dex' },
   // Aave V3
-  '0xa238dd80c259a72e81d7e4664a9801593f98d1c5': { name: 'Aave V3 Pool',        type: 'lending' },
-  '0xe20fcBdBfFC4Dd138cE8b2E6FBb6CB49777ad64': { name: 'Aave V3 Rewards',     type: 'lending' },
+  '0xa238dd80c259a72e81d7e4664a9801593f98d1c5': { name: 'Aave V3 Pool',              type: 'lending' },
+  '0xe20fcbdbffc4dd138ce8b2e6fbb6cb49777ad64': { name: 'Aave V3 Rewards',           type: 'lending' },
+  // Seamless Protocol (Aave V3 fork on Base)
+  '0x8f44fd754285aa6a2b8b9b97739b79746e0475a7': { name: 'Seamless Pool',             type: 'lending' },
   // Moonwell (Compound V2 fork)
-  '0xfbb21d0380bee3312b33c4353c8936a0f13ef26c': { name: 'Moonwell Comptroller', type: 'lending' },
-  // Euler Finance
-  '0x7d2768de32b0b80b7a3454c06bdac94a69ddc7a9': { name: 'Euler Finance',       type: 'lending' },
+  '0xfbb21d0380bee3312b33c4353c8936a0f13ef26c': { name: 'Moonwell Comptroller',      type: 'lending' },
+  // Morpho Blue
+  '0xbbbbbbbbbb9cc5e90e3b3af64bdaf62c37eeffcb': { name: 'Morpho Blue',               type: 'lending' },
+  // Euler Finance V2 (EVC-based)
+  '0x5301c7dd20bd945d2013b48ed0dee3a284ca8989': { name: 'Euler EVC',                 type: 'lending' },
+  '0x7f321498a801a191a93c840750ed637149ddf8d0': { name: 'Euler eVault Factory',      type: 'lending' },
+  // Compound V3 (Comet) markets on Base
+  '0xb125e6687d4313864e53df431d5425969c15eb2f': { name: 'Compound V3 USDC',          type: 'lending' },
+  '0x46e6b214b524310239732d51387075e0e70970bf': { name: 'Compound V3 WETH',          type: 'lending' },
+  '0x9c4ec768c28520b50860ea7a15bd7213a9ff58bf': { name: 'Compound V3 USDbC',         type: 'lending' },
+  '0x2c776041ccfe903071af44aa147368a9c8eea518': { name: 'Compound V3 USDS',          type: 'lending' },
+  '0x784efeb622244d2348d4f2522f8860b96fbece89': { name: 'Compound V3 AERO',          type: 'lending' },
   // Base Bridge
-  '0x4200000000000000000000000000000000000010': { name: 'L2 Standard Bridge',  type: 'bridge' },
-  '0x3154cf16ccdb4c6d922629664174b904d80f2c35': { name: 'Base Bridge',         type: 'bridge' },
+  '0x4200000000000000000000000000000000000010': { name: 'L2 Standard Bridge',        type: 'bridge' },
+  '0x3154cf16ccdb4c6d922629664174b904d80f2c35': { name: 'Base Bridge',               type: 'bridge' },
   // WETH
-  '0x4200000000000000000000000000000000000006': { name: 'WETH',                type: 'token' },
-  // 1inch
-  '0x1111111254eeb25477b68fb85ed929f73a960582': { name: '1inch Router',        type: 'dex' },
+  '0x4200000000000000000000000000000000000006': { name: 'WETH',                      type: 'token' },
+  // Aggregators
+  '0x1111111254eeb25477b68fb85ed929f73a960582': { name: '1inch Router',              type: 'dex' },
   // Stargate
-  '0x45f1a95a4d3f3836523f5c83673c797f4d4d263b': { name: 'Stargate USDC Pool',  type: 'bridge' },
+  '0x45f1a95a4d3f3836523f5c83673c797f4d4d263b': { name: 'Stargate USDC Pool',        type: 'bridge' },
 }
 
 // Address sets for protocol routing disambiguation
@@ -70,6 +94,25 @@ export const UNISWAP_V3_ADDRESSES = new Set([
   '0x198ef1ec325a96cc354c7266a038be8b5c558f67',  // NonfungiblePositionManager
   '0x03a520b32c04bf3beef7beb72e919cf822ed34f1',  // NonfungiblePositionManager2
   '0x3fc91a3afd70395cd496c647d5a6cc9d4b2b7fad',  // Universal Router
+])
+
+// Fixed-address protocols (same across all chains)
+export const MORPHO_BLUE_ADDRESS    = '0xbbbbbbbbbb9cc5e90e3b3af64bdaf62c37eeffcb'
+export const BALANCER_VAULT_ADDRESS = '0xba12222222228d8ba445958a75a0704d566bf2c8'
+
+// Seamless pool (Aave V3 fork) — emits same events as Aave; we distinguish by address
+export const SEAMLESS_POOL_ADDRESS  = '0x8f44fd754285aa6a2b8b9b97739b79746e0475a7'
+
+// Aave V3 pool on Base
+export const AAVE_V3_POOL_ADDRESS   = '0xa238dd80c259a72e81d7e4664a9801593f98d1c5'
+
+// Compound V3 Comet market addresses on Base
+export const COMPOUND3_ADDRESSES = new Set([
+  '0xb125e6687d4313864e53df431d5425969c15eb2f',  // cUSDCv3
+  '0x46e6b214b524310239732d51387075e0e70970bf',  // cWETHv3
+  '0x9c4ec768c28520b50860ea7a15bd7213a9ff58bf',  // cUSDbCv3
+  '0x2c776041ccfe903071af44aa147368a9c8eea518',  // cUSDSv3
+  '0x784efeb622244d2348d4f2522f8860b96fbece89',  // cAEROv3
 ])
 
 export const USDC_ADDRESS  = '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913'
@@ -155,3 +198,36 @@ export const UNI_V3_INCREASE_LIQ_TOPIC = '0x3067048beee31b25b2f1681f88dac838c8bb
 export const UNI_V3_DECREASE_LIQ_TOPIC = '0x26f6a048ee9138f2c0ce266f322cb99228e8d619ae2bff30c67f8dcf9d2377b4'
 // Collect(uint256 indexed tokenId, address recipient, uint256 amount0Collected, uint256 amount1Collected)
 export const UNI_V3_COLLECT_TOPIC      = '0x40d0efd1a53d60ecbf40971b9daf7dc90178c3eff3b3f722c8d5fdd96b56f8c9'
+// Balancer V2 — Swap(bytes32 indexed poolId, address indexed tokenIn, address indexed tokenOut, uint256 amountIn, uint256 amountOut)
+export const BALANCER_SWAP_TOPIC = '0x2170c741c41531aec20e7c107c24eecfdd15e69c9bb0a8dd37b1840b9e0b207b'
+// Morpho Blue events (from morpho-org/morpho-blue EventsLib.sol)
+// Supply(bytes32 indexed id, address indexed caller, address indexed onBehalf, uint256 assets, uint256 shares)
+export const MORPHO_SUPPLY_TOPIC              = '0xedf8870433c83823eb071d3df1caa8d008f12f6440918c20d75a3602cda30fe0'
+// SupplyCollateral(bytes32 indexed id, address indexed caller, address indexed onBehalf, uint256 assets)
+export const MORPHO_SUPPLY_COLLATERAL_TOPIC   = '0xa3b9472a1399e17e123f3c2e6586c23e504184d504de59cdaa2b375e880c6184'
+// Borrow(bytes32 indexed id, address caller, address indexed onBehalf, address indexed receiver, uint256 assets, uint256 shares)
+export const MORPHO_BORROW_TOPIC              = '0x570954540bed6b1304a87dfe815a5eda4a648f7097a16240dcd85c9b5fd42a43'
+// Repay(bytes32 indexed id, address indexed caller, address indexed onBehalf, uint256 assets, uint256 shares)
+export const MORPHO_REPAY_TOPIC               = '0x52acb05cebbd3cd39715469f22afbf5a17496295ef3bc9bb5944056c63ccaa09'
+// Withdraw(bytes32 indexed id, address caller, address indexed onBehalf, address indexed receiver, uint256 assets, uint256 shares)
+export const MORPHO_WITHDRAW_TOPIC            = '0xa56fc0ad5702ec05ce63666221f796fb62437c32db1aa1aa075fc6484cf58fbf'
+// WithdrawCollateral(bytes32 indexed id, address caller, address indexed onBehalf, address indexed receiver, uint256 assets)
+export const MORPHO_WITHDRAW_COLLATERAL_TOPIC = '0xe80ebd7cc9223d7382aab2e0d1d6155c65651f83d53c8b9b06901d167e321142'
+// Liquidate(bytes32 indexed id, address indexed caller, address indexed borrower, uint256 repaidAssets, uint256 repaidShares, uint256 seizedAssets, uint256 badDebtAssets, uint256 badDebtShares)
+export const MORPHO_LIQUIDATE_TOPIC           = '0xa4946ede45d0c6f06a0f5ce92c9ad3b4751452d2fe0e25010783bcab57a67e41'
+// Euler V2 EVault events (ERC-4626 + custom borrow/repay)
+// Deposit(address indexed caller, address indexed owner, uint256 assets, uint256 shares)
+export const EULER_DEPOSIT_TOPIC  = '0xdcbc1c05240f31ff3ad067ef1ee35ce4997762752e3a095284754544f4c709d7'
+// Withdraw(address indexed caller, address indexed receiver, address indexed owner, uint256 assets, uint256 shares)
+export const EULER_WITHDRAW_TOPIC = '0xfbde797d201c681b91056529119e0b02407c7bb96a4a2c75c01fc9667232c8db'
+// Borrow(address indexed account, uint256 assets)
+export const EULER_BORROW_TOPIC   = '0xcbc04eca7e9da35cb1393a6135a199ca52e450d5e9251cbd99f7847d33a36750'
+// Repay(address indexed account, uint256 assets)
+export const EULER_REPAY_TOPIC    = '0x5c16de4f8b59bd9caf0f49a545f25819a895ed223294290b408242e72a594231'
+// Compound V3 (Comet) events
+// Supply(address indexed from, address indexed dst, uint256 amount)
+export const COMPOUND3_SUPPLY_TOPIC   = '0xd1cf3d156d5f8f0d50f6c122ed609cec09d35c9b9fb3fff6ea0959134dae424e'
+// Withdraw(address indexed src, address indexed to, uint256 amount)
+export const COMPOUND3_WITHDRAW_TOPIC = '0x9b1bfa7fa9ee420a16e124f794c35ac9f90472acc99140eb2f6447c714cad8eb'
+// AbsorbDebt(address indexed absorber, address indexed borrower, uint256 basePaidOut, uint256 usdValue) — liquidation
+export const COMPOUND3_ABSORB_TOPIC   = '0x1547a878dc89ad3c367b6338b4be6a65a5dd74fb77ae044da1e8747ef1f4f62f'

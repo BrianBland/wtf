@@ -12,9 +12,39 @@ import { AccountActivity } from './AccountActivity'
 import { ProtocolDrillDown } from './ProtocolDrillDown'
 import { MetaSankeyView } from './MetaSankeyView'
 import { CallAggregationsView } from './CallAggregationsView'
+import { DecodedCallView } from './TxView'
 import { KNOWN_TOKENS, KNOWN_PROTOCOLS, KNOWN_SELECTORS } from '../lib/protocols'
 import { formatEth, formatGas, formatGwei, formatTimestamp, formatAge, formatNumber, shortHash } from '../lib/formatters'
 import { detectFlashblocks, flashblockCount } from '../lib/flashblocks'
+import { computeParallelization } from '../lib/stateAccess'
+
+// ── DeFi action glyphs ────────────────────────────────────────────────────
+
+const ACTION_GLYPH: Record<string, string> = {
+  'Swap':             '⇄',
+  'Supply':           '↑',
+  'Withdraw':         '↓',
+  'Borrow':           '⤓',
+  'Repay':            '⤒',
+  'AddLiquidity':     '+',
+  'RemoveLiquidity':  '−',
+  'Liquidation':      '⚡',
+  'Flash Loan':       '↯',
+  'Transfer':         '→',
+  'Wrap':             '⊕',
+  'Unwrap':           '⊖',
+}
+
+function defiSummary(protocols: { action: string }[]): string {
+  const counts = new Map<string, number>()
+  for (const p of protocols) counts.set(p.action, (counts.get(p.action) ?? 0) + 1)
+  return [...counts.entries()]
+    .map(([action, n]) => {
+      const g = ACTION_GLYPH[action] ?? action[0]
+      return n > 1 ? `${g}×${n}` : g
+    })
+    .join(' ')
+}
 
 // ── Block nav & header ────────────────────────────────────────────────────
 
@@ -220,7 +250,7 @@ function TxRow({ tx, selected, onClick }: { tx: Transaction; selected: boolean; 
       <div className="flex-center gap4" style={{ minWidth: 140, justifyContent: 'flex-end', flexShrink: 0, flexWrap: 'wrap' }}>
         {hasEth    && <span className="badge amber">{formatEth(tx.value, 4)} ETH</span>}
         {hasTokens && <TokenFlowBadges tokenFlows={tx.tokenFlows} />}
-        {hasDefi   && <span className="badge purple">{tx.protocols.map((p) => p.action[0]).join('')}</span>}
+        {hasDefi   && <span className="badge purple">{defiSummary(tx.protocols)}</span>}
         {!hasEth && !hasTokens && !hasDefi && <span className="muted" style={{ fontSize: 10 }}>—</span>}
       </div>
     </div>
@@ -265,6 +295,14 @@ function TxQuickDetail({ tx, blockNumber }: { tx: Transaction; blockNumber: numb
             </div>
           )}
         </div>
+
+        {/* Decoded call / raw input */}
+        {tx.input && tx.input !== '0x' && tx.methodSelector && (
+          <section>
+            <div className="panel-header" style={{ fontSize: 10 }}>Call</div>
+            <DecodedCallView input={tx.input} selector={tx.methodSelector} />
+          </section>
+        )}
 
         {/* Protocol events */}
         {tx.protocols.length > 0 && (
@@ -556,17 +594,22 @@ function CollapsibleMetaSankey({ block }: { block: Block }) {
 function CollapsibleCallAggregations({ block }: { block: Block }) {
   const [open, setOpen]         = useState(false)
   const [expanded, setExpanded] = useState(false)
-  const { blockStateCache } = useStore()
+  const { blockStateCache, startBlockStateTrace } = useStore()
   const { ref, isFullscreen, toggle: toggleFullscreen } = useFullscreen()
   const cache = blockStateCache.get(block.number)
   const callResults = cache?.callResults
   const running = cache?.status === 'running'
 
-  const subtitle = !cache
-    ? 'load State Access first'
-    : running
-      ? `${cache.done}/${cache.total} traced…`
-      : `${callResults?.size ?? 0} txs traced`
+  // Trigger trace loading as soon as the panel is opened
+  useEffect(() => {
+    if (open && !cache) startBlockStateTrace(block.number)
+  }, [open, block.number, cache])
+
+  const subtitle = running
+    ? `${cache.done}/${cache.total} traced…`
+    : callResults?.size
+      ? `${callResults.size} txs traced`
+      : open && !cache ? 'loading…' : ''
 
   return (
     <div
@@ -613,7 +656,7 @@ function CollapsibleCallAggregations({ block }: { block: Block }) {
           {callResults && callResults.size > 0
             ? <CallAggregationsView callResults={callResults} />
             : <div className="empty-state" style={{ padding: 16 }}>
-                {!cache ? 'Open State Access to load trace data' : running ? 'Tracing…' : 'No call data available'}
+                {running ? `Tracing… ${cache.done}/${cache.total}` : !cache ? 'Starting trace…' : 'No call data available'}
               </div>
           }
         </div>
@@ -623,6 +666,119 @@ function CollapsibleCallAggregations({ block }: { block: Block }) {
 }
 
 const EMPTY_HIST_FILTER: HistogramFilter = { sender: null, recipient: null, selector: null }
+
+// ── Trace stats bar ───────────────────────────────────────────────────────
+
+function TraceStatsBar({ block }: { block: Block }) {
+  const { blockStateCache, startBlockStateTrace } = useStore()
+  const cache = blockStateCache.get(block.number)
+  const running = cache?.status === 'running'
+  const done    = cache?.status === 'done'
+
+  const parallelStats = useMemo(() => {
+    if (!done || !cache?.txResults) return null
+    return computeParallelization(cache.txResults, block.transactions.map((t) => t.hash))
+  }, [done, cache?.txResults, block.transactions])
+
+  const readOnlyStats = useMemo(() => {
+    if (!done || !cache?.txResults) return null
+    const n = block.transactions.length
+    if (n === 0) return null
+    let count = 0
+    let gasNum = 0n
+    for (const tx of block.transactions) {
+      const accesses = cache.txResults.get(tx.hash) ?? []
+      const sender   = tx.from
+      const hasSlotWrite    = accesses.some((a) => a.slot  && a.type === 'write')
+      const hasBalanceWrite = accesses.some((a) => !a.slot && a.type === 'write' && a.addr !== sender)
+      if (!hasSlotWrite && !hasBalanceWrite) {
+        count++
+        gasNum += tx.gasUsed ?? 0n
+      }
+    }
+    const gasDen = block.gasUsed || 1n
+    const gasPct = block.transactions.some((t) => t.gasUsed !== undefined)
+      ? Math.round(Number(gasNum * 100n / gasDen))
+      : null
+    return { count, txPct: Math.round(count / n * 100), gasPct }
+  }, [done, cache?.txResults, block.transactions, block.gasUsed])
+
+  // Not yet triggered
+  if (!cache) {
+    return (
+      <div style={{ flexShrink: 0, borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: 8, padding: '5px 12px' }}>
+        <span className="muted" style={{ fontSize: 10 }}>Trace stats</span>
+        <span style={{ color: 'var(--border)' }}>·</span>
+        <button
+          className="topbar-btn"
+          style={{ fontSize: 10 }}
+          onClick={() => startBlockStateTrace(block.number)}
+        >
+          load →
+        </button>
+      </div>
+    )
+  }
+
+  // Loading in progress
+  if (running) {
+    const pct = cache.total > 0 ? Math.round(cache.done / cache.total * 100) : 0
+    return (
+      <div style={{ flexShrink: 0, borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: 8, padding: '5px 12px' }}>
+        <span className="muted" style={{ fontSize: 10 }}>Trace stats</span>
+        <span style={{ color: 'var(--border)' }}>·</span>
+        <span style={{ fontSize: 10, color: 'var(--accent)', animation: 'pulse 1s infinite' }}>●</span>
+        <span style={{ fontSize: 10 }}>Tracing txs… {cache.done}/{cache.total} ({pct}%)</span>
+      </div>
+    )
+  }
+
+  // Stats ready
+  const score = parallelStats?.score ?? 0
+  const scoreColor = score >= 0.8 ? 'var(--green)' : score >= 0.5 ? '#ffb74d' : 'var(--red)'
+
+  const roCount = readOnlyStats?.count ?? 0
+  const roTxPct = readOnlyStats?.txPct ?? 0
+  const roGasPct = readOnlyStats?.gasPct
+
+  return (
+    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', borderBottom: '1px solid var(--border)', flexShrink: 0 }}>
+      {([
+        {
+          label: 'Parallel Score',
+          value: `${(score * 100).toFixed(0)}%`,
+          color: scoreColor,
+          title: "How parallelizable this block's txs are (1 = fully independent)",
+        },
+        {
+          label: 'Chain',
+          value: parallelStats?.criticalPath?.toString() ?? '—',
+          title: 'Minimum sequential batches needed (critical path length)',
+        },
+        {
+          label: 'Peak Parallel',
+          value: parallelStats?.maxConcurrent?.toString() ?? '—',
+          title: 'Max txs that can execute concurrently in the widest batch',
+        },
+        {
+          label: 'Conflicted Txs',
+          value: parallelStats ? `${parallelStats.conflictedTxs}/${parallelStats.totalTxs}` : '—',
+          title: 'Txs with RAW or WAW state dependency on a prior tx',
+        },
+        {
+          label: 'Read-only Txs',
+          value: `${roCount} (${roTxPct}% txs${roGasPct !== null ? ` · ${roGasPct}% gas` : ''})`,
+          title: 'Txs with no storage writes and no ETH balance transfers',
+        },
+      ] as { label: string; value: string; color?: string; title: string }[]).map(({ label, value, color, title }) => (
+        <div key={label} style={{ padding: '5px 12px', borderRight: '1px solid var(--border)' }} title={title}>
+          <div className="stat-label">{label}</div>
+          <div className="stat-value" style={{ fontSize: 11, color: color ?? 'var(--text)' }}>{value}</div>
+        </div>
+      ))}
+    </div>
+  )
+}
 
 // ── Main block view ───────────────────────────────────────────────────────
 
@@ -680,6 +836,9 @@ export function BlockView({ blockNumber }: { blockNumber: number }) {
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
       {/* Block nav + stats */}
       <BlockHeader blockNumber={blockNumber} />
+
+      {/* Trace-derived stats (parallelization, read-only) */}
+      <TraceStatsBar block={block} />
 
       {/* Collapsible histograms — tx aggregations */}
       <BlockHistograms blockNumber={blockNumber} filter={histFilter} onFilter={setHistFilter} sortBy={sortBy} onSortBy={setSortBy} />

@@ -6,9 +6,117 @@ import { CollapsibleList } from './CollapsibleList'
 import { TokenFlowList, EthFlowList, ProtocolEventList, NetFlowSummary } from './ValueFlow'
 import { KNOWN_PROTOCOLS, KNOWN_TOKENS } from '../lib/protocols'
 import {
-  formatEth, formatGas, formatGwei, formatNumber, shortHash, shortAddr,
+  formatEth, formatGas, formatNumber, shortAddr,
   hexToBigInt,
 } from '../lib/formatters'
+import { decodeCalldata, DecodedValue, DecodedParam } from '../lib/calldataDecoder'
+
+// ── Decoded calldata view ─────────────────────────────────────────────────
+
+function DecodedValueDisplay({ value, type }: { value: DecodedValue; type: string }) {
+  switch (value.kind) {
+    case 'address':
+      return <HexTag value={value.hex} type="address" />
+    case 'bool':
+      return (
+        <span className="badge" style={{ background: value.value ? 'var(--green)' : 'var(--surface3)', fontSize: 9 }}>
+          {value.value ? 'true' : 'false'}
+        </span>
+      )
+    case 'uint':
+    case 'int': {
+      const n = value.value
+      const s = n < 0n ? '-' + (-n).toString() : n.toString()
+      const display = s.length > 20 ? s.slice(0, 10) + '…' + s.slice(-6) : s
+      return <span style={{ color: 'var(--accent)', fontFamily: 'var(--font-mono)', fontSize: 10 }} title={s}>{display}</span>
+    }
+    case 'bytes_fixed':
+      return <span style={{ color: 'var(--text3)', fontFamily: 'var(--font-mono)', fontSize: 9 }}>{value.hex.slice(0, 18)}{value.hex.length > 18 ? '…' : ''}</span>
+    case 'bytes': {
+      const h = value.hex
+      const preview = h.length > 34 ? h.slice(0, 18) + '…' + h.slice(-6) : h
+      return <span style={{ color: 'var(--text3)', fontFamily: 'var(--font-mono)', fontSize: 9 }} title={h}>{preview}</span>
+    }
+    case 'string':
+      return <span style={{ color: 'var(--text2)', fontSize: 10 }}>"{value.value}"</span>
+    case 'tuple':
+      return <DecodedTupleDisplay fields={value.fields} />
+    case 'array': {
+      const elemName = value.elementType
+      return (
+        <span style={{ color: 'var(--text3)', fontSize: 9 }}>
+          {elemName}[{value.total}]{value.elements.length > 0 ? ` (${value.elements.length} shown)` : ''}
+        </span>
+      )
+    }
+    default:
+      return <span style={{ color: 'var(--text3)', fontSize: 9 }}>{type}</span>
+  }
+}
+
+function DecodedTupleDisplay({ fields }: { fields: DecodedParam[] }) {
+  return (
+    <div style={{ borderLeft: '2px solid var(--border)', paddingLeft: 8, marginTop: 2 }}>
+      {fields.map((f, i) => (
+        <div key={i} style={{ display: 'flex', gap: 4, alignItems: 'center', minHeight: 18 }}>
+          <span style={{ color: 'var(--text3)', fontSize: 9, minWidth: 0, flexShrink: 0 }}>{f.name}:</span>
+          <DecodedValueDisplay value={f.value} type={f.type} />
+        </div>
+      ))}
+    </div>
+  )
+}
+
+export function DecodedCallView({ input, selector }: { input: string; selector: string }) {
+  const decoded = decodeCalldata(input, selector)
+
+  const rawCalldata = (
+    <details>
+      <summary style={{ cursor: 'pointer', fontSize: 9, color: 'var(--text3)', padding: '2px 12px', userSelect: 'none' }}>
+        raw calldata ({Math.floor((input.length - 2) / 2)} bytes)
+      </summary>
+      <div style={{
+        fontSize: 10, color: 'var(--text2)', wordBreak: 'break-all', lineHeight: 1.8,
+        fontFamily: 'var(--font-mono)', background: 'var(--surface2)',
+        padding: '6px 12px', borderTop: '1px solid var(--border)',
+      }}>
+        <span style={{ color: 'var(--purple)' }}>{input.slice(0, 10)}</span>
+        {input.slice(10)}
+      </div>
+    </details>
+  )
+
+  if (!decoded) {
+    return (
+      <div>
+        <div style={{ padding: '4px 12px', fontSize: 10, color: 'var(--text3)', fontFamily: 'var(--font-mono)' }}>
+          {selector}
+        </div>
+        {rawCalldata}
+      </div>
+    )
+  }
+
+  return (
+    <div>
+      <div style={{ padding: '6px 12px' }}>
+        <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--accent)', fontWeight: 600, marginBottom: 4 }}>
+          {decoded.name}()
+        </div>
+        {decoded.params.length === 0 && (
+          <span style={{ fontSize: 9, color: 'var(--text3)' }}>no args</span>
+        )}
+        {decoded.params.map((p, i) => (
+          <div key={i} style={{ display: 'flex', gap: 4, alignItems: 'flex-start', marginBottom: 3 }}>
+            <span style={{ color: 'var(--text3)', fontSize: 9, flexShrink: 0, paddingTop: 1 }}>{p.name}:</span>
+            <DecodedValueDisplay value={p.value} type={p.type} />
+          </div>
+        ))}
+      </div>
+      {rawCalldata}
+    </div>
+  )
+}
 
 // ── Call trace tree ───────────────────────────────────────────────────────
 
@@ -334,22 +442,45 @@ export function TxView({ txHash, blockNumber }: { txHash: string; blockNumber: n
               ) : (
                 <>
                   {tx.methodSelector && (
-                    <div style={{ marginBottom: 8, fontSize: 11 }}>
-                      Selector: <SelectorTag selector={tx.methodSelector} />
+                    <div style={{ marginBottom: 8, fontSize: 11, display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <SelectorTag selector={tx.methodSelector} />
+                      <span className="muted" style={{ fontSize: 9 }}>{tx.input.length / 2 - 2} bytes</span>
                     </div>
                   )}
-                  <div style={{
-                    fontSize: 10, color: 'var(--text2)',
-                    wordBreak: 'break-all', lineHeight: 1.8,
-                    fontFamily: 'var(--font-mono)',
-                    background: 'var(--surface2)',
-                    padding: '8px 10px',
-                    borderRadius: 2,
-                    border: '1px solid var(--border)',
-                  }}>
-                    <span style={{ color: 'var(--purple)' }}>{tx.input.slice(0, 10)}</span>
-                    {tx.input.slice(10)}
-                  </div>
+                  {tx.methodSelector && (() => {
+                    const decoded = decodeCalldata(tx.input, tx.methodSelector)
+                    if (!decoded || decoded.params.length === 0) return null
+                    return (
+                      <div style={{
+                        marginBottom: 10, background: 'var(--surface2)',
+                        border: '1px solid var(--border)', borderRadius: 2, padding: '6px 10px',
+                      }}>
+                        {decoded.params.map((p, i) => (
+                          <div key={i} style={{ display: 'flex', gap: 6, alignItems: 'flex-start', marginBottom: 3 }}>
+                            <span style={{ color: 'var(--text3)', fontSize: 9, flexShrink: 0, paddingTop: 1, minWidth: 80 }}>{p.name}</span>
+                            <DecodedValueDisplay value={p.value} type={p.type} />
+                          </div>
+                        ))}
+                      </div>
+                    )
+                  })()}
+                  <details>
+                    <summary style={{ cursor: 'pointer', fontSize: 9, color: 'var(--text3)', marginBottom: 4, userSelect: 'none' }}>
+                      raw calldata
+                    </summary>
+                    <div style={{
+                      fontSize: 10, color: 'var(--text2)',
+                      wordBreak: 'break-all', lineHeight: 1.8,
+                      fontFamily: 'var(--font-mono)',
+                      background: 'var(--surface2)',
+                      padding: '8px 10px',
+                      borderRadius: 2,
+                      border: '1px solid var(--border)',
+                    }}>
+                      <span style={{ color: 'var(--purple)' }}>{tx.input.slice(0, 10)}</span>
+                      {tx.input.slice(10)}
+                    </div>
+                  </details>
                 </>
               )}
             </div>
@@ -415,6 +546,14 @@ export function TxView({ txHash, blockNumber }: { txHash: string; blockNumber: n
               ))}
             </div>
           </div>
+
+          {/* Decoded call */}
+          {tx.input && tx.input !== '0x' && tx.methodSelector && (
+            <section>
+              <div className="panel-header">Call</div>
+              <DecodedCallView input={tx.input} selector={tx.methodSelector} />
+            </section>
+          )}
 
           {/* Protocol events quick list */}
           {tx.protocols.length > 0 && (

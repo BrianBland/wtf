@@ -236,15 +236,21 @@ export function BlockStateAccessView({ block, onSelectTx }: { block: Block; onSe
     return addrLabel(addr)
   }, [tokenCache])
 
-  // Txs that have no writes among their traced accesses
+  // Txs that have no meaningful writes (no slot writes, no ETH-transfer balance writes)
   const readOnlyTxs = useMemo(() => {
     if (!filteredTxResults) return new Set<string>()
+    const senderOf = new Map(block.transactions.map((tx) => [tx.hash, tx.from]))
     const s = new Set<string>()
     for (const [hash, accesses] of filteredTxResults) {
-      if (accesses.every(a => a.type === 'read' || !a.slot)) s.add(hash)
+      const sender = senderOf.get(hash)
+      // Disqualify if any storage slot is written
+      if (accesses.some((a) => a.slot && a.type === 'write')) continue
+      // Disqualify if any non-sender account has a balance/nonce write (internal ETH transfer)
+      if (accesses.some((a) => !a.slot && a.type === 'write' && a.addr !== sender)) continue
+      s.add(hash)
     }
     return s
-  }, [filteredTxResults])
+  }, [filteredTxResults, block.transactions])
 
   // ── Zoom / pan ──────────────────────────────────────────────────────────────
   useEffect(() => {
