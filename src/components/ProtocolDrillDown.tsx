@@ -266,8 +266,11 @@ export function ProtocolDrillDown({
   const groups = useMemo(() => {
     const resolve = (addr: string): string | undefined => {
       const m = poolCache.get(addr)
-      if (typeof m === 'object' && m.protocol !== 'Unknown') return m.protocol
-      return undefined
+      // Return factory-resolved protocol when known, including 'Unknown'.
+      // Returning 'Unknown' (instead of undefined) prevents falling back to
+      // the eventProtocols which may contain stale 'Uniswap V3' guesses.
+      if (typeof m === 'object') return m.protocol
+      return undefined  // still loading or error — fall back to eventProtocols
     }
     return groupByProtocol(flatPools, resolve)
   }, [flatPools, poolCache])

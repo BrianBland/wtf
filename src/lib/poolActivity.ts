@@ -73,16 +73,21 @@ export function groupByProtocol(
 ): Map<string, PoolSummary[]> {
   const groups = new Map<string, PoolSummary[]>()
 
+  // Generic fallback names used when the factory lookup fails — treat as lowest priority.
+  const FALLBACK_PROTOCOLS = new Set(['Uniswap V3', 'Uniswap V2', 'Aerodrome', 'Unknown'])
+
   for (const pool of pools.values()) {
-    // Use factory-resolved protocol if available, else pick the most common event protocol
-    const resolved =
-      resolveProtocol(pool.pool) ??
-      [...pool.eventProtocols].sort(
-        (a, b) =>
-          [...pool.eventProtocols].filter((x) => x === b).length -
-          [...pool.eventProtocols].filter((x) => x === a).length
-      )[0] ??
+    // Use factory-resolved protocol if available, else pick the best event protocol.
+    // eventProtocols is a Set so all items have count=1 — the old sort was meaningless.
+    // Instead, prefer specific protocol names over generic fallbacks like 'Uniswap V3'
+    // which are often the result of hint-based guessing rather than factory lookup.
+    const protos = [...pool.eventProtocols]
+    const eventProtocol =
+      protos.find(p => !FALLBACK_PROTOCOLS.has(p)) ??  // prefer specific over generic
+      protos[0] ??
       'Unknown'
+
+    const resolved = resolveProtocol(pool.pool) ?? eventProtocol
 
     if (!groups.has(resolved)) groups.set(resolved, [])
     groups.get(resolved)!.push(pool)
