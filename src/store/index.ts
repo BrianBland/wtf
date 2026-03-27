@@ -97,8 +97,11 @@ function processLogs(
   hint: ProtocolHint = null,
   poolProtocols: Map<string, string> = new Map(),
 ): { tokenFlows: TokenFlow[]; protocols: ProtocolEvent[] } {
-  // Hint is used as fallback for pools not in poolProtocols (e.g. non-swap V3 events)
-  const clProtocol = hint === 'aerodrome' ? 'Aerodrome' : 'Uniswap V3'
+  // Hint is used as fallback for pools not in poolProtocols (e.g. non-swap V3 events).
+  // 'aerodrome' hint → Aerodrome CL (concentrated liquidity V3-style pools)
+  // 'uniswap-v3' hint → Uniswap V3
+  // null hint (aggregator/unknown router) → 'Unknown' rather than mis-attributing to Uniswap V3
+  const clProtocol = hint === 'aerodrome' ? 'Aerodrome CL' : hint === 'uniswap-v3' ? 'Uniswap V3' : 'Unknown'
   const tokenFlows: TokenFlow[] = []
   const protocols: ProtocolEvent[] = []
 
@@ -129,8 +132,9 @@ function processLogs(
 
     // V2-style AMM Swap — factory lookup disambiguates (Aerodrome, PancakeSwap V2, SushiSwap V2, etc.)
     if (t0 === AMM_SWAP_TOPIC) {
+      const ammProtocol = poolProtocols.get(log.address) ?? (hint === 'aerodrome' ? 'Aerodrome' : 'Unknown')
       protocols.push({
-        protocol: poolProtocols.get(log.address) ?? 'Aerodrome', action: 'Swap',
+        protocol: ammProtocol, action: 'Swap',
         extra: { pool: log.address },
       })
     }
