@@ -210,6 +210,22 @@ a { color: var(--accent); text-decoration: none; }
 .data-row:hover { background: var(--surface2); }
 .data-row.selected { background: var(--surface2); border-left: 2px solid var(--accent); padding-left: 10px; }
 
+/* Explorer external links — hidden in compact rows, revealed on row hover */
+.explorer-link {
+  display: inline-flex;
+  align-items: center;
+  opacity: 0;
+  font-size: 9px;
+  color: var(--text3);
+  text-decoration: none;
+  flex-shrink: 0;
+  transition: opacity 0.1s, color 0.1s;
+  line-height: 1;
+}
+.data-row:hover .explorer-link { opacity: 1; }
+.explorer-link:hover { color: var(--accent) !important; }
+.explorer-link-visible { opacity: 1; }
+
 /* ── Hex tags ────────────────────────────────────────────────────────────── */
 .hex-tag {
   display: inline-flex;

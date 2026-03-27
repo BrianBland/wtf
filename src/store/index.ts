@@ -69,10 +69,12 @@ async function fetchV3PoolProtocols(
     const cached = poolCache.get(addr)
     if (cached && typeof cached === 'object') {
       protocols.set(addr, cached.protocol)
-    } else if (!cached) {
+    } else if (!cached || cached === 'loading') {
+      // Also fetch pools that are 'loading' — another component may have triggered
+      // a concurrent fetch, but we need the result synchronously for block processing.
       toFetch.push(addr)
     }
-    // 'loading' or 'error' → skip, falls back to hint
+    // 'error' → skip, falls back to hint
   }
 
   const newMeta = new Map<string, PoolMeta>()
@@ -97,11 +99,10 @@ function processLogs(
   hint: ProtocolHint = null,
   poolProtocols: Map<string, string> = new Map(),
 ): { tokenFlows: TokenFlow[]; protocols: ProtocolEvent[] } {
-  // Hint is used as fallback for pools not in poolProtocols (e.g. non-swap V3 events).
-  // 'aerodrome' hint → Aerodrome CL (concentrated liquidity V3-style pools)
-  // 'uniswap-v3' hint → Uniswap V3
-  // null hint (aggregator/unknown router) → 'Unknown' rather than mis-attributing to Uniswap V3
-  const clProtocol = hint === 'aerodrome' ? 'Aerodrome CL' : hint === 'uniswap-v3' ? 'Uniswap V3' : 'Unknown'
+  // Hint is used as fallback for pools not in poolProtocols (e.g. factory lookup failed/loading).
+  // 'aerodrome' hint → Aerodrome CL (V3-style concentrated liquidity pools)
+  // 'uniswap-v3' or null hint → Uniswap V3 (rough guess; poolCache will correct on re-render)
+  const clProtocol = hint === 'aerodrome' ? 'Aerodrome CL' : 'Uniswap V3'
   const tokenFlows: TokenFlow[] = []
   const protocols: ProtocolEvent[] = []
 
@@ -132,9 +133,8 @@ function processLogs(
 
     // V2-style AMM Swap — factory lookup disambiguates (Aerodrome, PancakeSwap V2, SushiSwap V2, etc.)
     if (t0 === AMM_SWAP_TOPIC) {
-      const ammProtocol = poolProtocols.get(log.address) ?? (hint === 'aerodrome' ? 'Aerodrome' : 'Unknown')
       protocols.push({
-        protocol: ammProtocol, action: 'Swap',
+        protocol: poolProtocols.get(log.address) ?? 'Aerodrome', action: 'Swap',
         extra: { pool: log.address },
       })
     }

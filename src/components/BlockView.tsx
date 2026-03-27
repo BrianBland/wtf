@@ -46,6 +46,24 @@ function defiSummary(protocols: { action: string }[]): string {
     .join(' ')
 }
 
+// ── Explorer links ────────────────────────────────────────────────────────
+
+function ExplorerLink({ hash, type = 'tx', visible = false }: { hash: string; type?: 'tx' | 'address'; visible?: boolean }) {
+  const url = type === 'tx'
+    ? `https://basescan.org/tx/${hash}`
+    : `https://basescan.org/address/${hash}`
+  return (
+    <a
+      className={`explorer-link${visible ? ' explorer-link-visible' : ''}`}
+      href={url}
+      target="_blank"
+      rel="noopener noreferrer"
+      title={`Open in Basescan`}
+      onClick={(e) => e.stopPropagation()}
+    >↗</a>
+  )
+}
+
 // ── Block nav & header ────────────────────────────────────────────────────
 
 function BlockHeader({ blockNumber }: { blockNumber: number }) {
@@ -240,8 +258,11 @@ function TxRow({ tx, selected, onClick }: { tx: Transaction; selected: boolean; 
       {/* From → To · method */}
       <div className="flex-center gap4" style={{ flex: 1, overflow: 'hidden', minWidth: 0 }}>
         <HexTag value={tx.from} type="address" />
+        <ExplorerLink hash={tx.from} type="address" />
         <span className="flow-arrow" style={{ flexShrink: 0 }}>→</span>
-        {tx.to ? <HexTag value={tx.to} type="address" /> : <span className="badge muted">deploy</span>}
+        {tx.to
+          ? <><HexTag value={tx.to} type="address" /><ExplorerLink hash={tx.to} type="address" /></>
+          : <span className="badge muted">deploy</span>}
         <span className="muted" style={{ fontSize: 9, flexShrink: 0 }}>·</span>
         <SelectorTag selector={tx.methodSelector} />
       </div>
@@ -253,6 +274,9 @@ function TxRow({ tx, selected, onClick }: { tx: Transaction; selected: boolean; 
         {hasDefi   && <span className="badge purple">{defiSummary(tx.protocols)}</span>}
         {!hasEth && !hasTokens && !hasDefi && <span className="muted" style={{ fontSize: 10 }}>—</span>}
       </div>
+
+      {/* Tx explorer link — appears on row hover, far right */}
+      <ExplorerLink hash={tx.hash} type="tx" />
     </div>
   )
 }
@@ -267,6 +291,7 @@ function TxQuickDetail({ tx, blockNumber }: { tx: Transaction; blockNumber: numb
       {/* Header */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 10px', borderBottom: '1px solid var(--border)', flexShrink: 0 }}>
         <HexTag value={tx.hash} type="hash" muted />
+        <ExplorerLink hash={tx.hash} type="tx" visible />
         <button
           className="nav-btn"
           style={{ marginLeft: 'auto', color: 'var(--accent)', whiteSpace: 'nowrap' }}
@@ -280,11 +305,13 @@ function TxQuickDetail({ tx, blockNumber }: { tx: Transaction; blockNumber: numb
           <div className="flex-center gap4" style={{ fontSize: 11 }}>
             <span className="muted" style={{ minWidth: 28, fontSize: 10 }}>from</span>
             <HexTag value={tx.from} type="address" />
+            <ExplorerLink hash={tx.from} type="address" visible />
           </div>
           {tx.to && (
             <div className="flex-center gap4" style={{ fontSize: 11 }}>
               <span className="muted" style={{ minWidth: 28, fontSize: 10 }}>to</span>
               <HexTag value={tx.to} type="address" />
+              <ExplorerLink hash={tx.to} type="address" visible />
               {KNOWN_PROTOCOLS[tx.to] && <span className="badge muted">{KNOWN_PROTOCOLS[tx.to].name}</span>}
             </div>
           )}
@@ -687,8 +714,9 @@ function TraceStatsBar({ block }: { block: Block }) {
     let count = 0
     let gasNum = 0n
     for (const tx of block.transactions) {
-      const accesses = cache.txResults.get(tx.hash) ?? []
-      const sender   = tx.from
+      const accesses = cache.txResults.get(tx.hash)
+      if (!accesses) continue  // errored or untraced — unknown, don't count as read-only
+      const sender   = tx.from?.toLowerCase()
       const hasSlotWrite    = accesses.some((a) => a.slot  && a.type === 'write')
       const hasBalanceWrite = accesses.some((a) => !a.slot && a.type === 'write' && a.addr !== sender)
       if (!hasSlotWrite && !hasBalanceWrite) {
