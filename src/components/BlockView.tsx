@@ -26,8 +26,8 @@ const ACTION_GLYPH: Record<string, string> = {
   'Withdraw':         '↓',
   'Borrow':           '⤓',
   'Repay':            '⤒',
-  'AddLiquidity':     '+',
-  'RemoveLiquidity':  '−',
+  'AddLiquidity':     '▲',
+  'RemoveLiquidity':  '▽',
   'Liquidation':      '⚡',
   'Flash Loan':       '↯',
   'Transfer':         '→',
@@ -240,6 +240,30 @@ function TokenFlowBadges({ tokenFlows }: { tokenFlows: TokenFlow[] }) {
   )
 }
 
+/** Auto-scale ETH value to a readable unit:
+ *  ≥ 0.0001 ETH → ETH (4 dp), ≥ 1 gwei → gwei/mwei, else wei */
+function formatEthAuto(wei: bigint): string {
+  if (wei >= 100_000_000_000_000n) return `${formatEth(wei, 4)} ETH`
+  if (wei >= 1_000_000_000n)       return formatGwei(wei)
+  return `${Number(wei)} wei`
+}
+
+/** Priority fee color by absolute threshold (in wei):
+ *  0          → gray
+ *  < 1 mwei   → blue
+ *  < 0.01gwei → green
+ *  < 0.1gwei  → yellow
+ *  < 1gwei    → orange
+ *  ≥ 1gwei    → red */
+function tipColor(tip: bigint): string {
+  if (tip === 0n)              return 'var(--text3)'
+  if (tip <    1_000_000n)     return '#4fc3f7' // blue   < 1 mwei
+  if (tip <   10_000_000n)     return '#69f0ae' // green  < 0.01 gwei
+  if (tip <  100_000_000n)     return '#fff176' // yellow < 0.1 gwei
+  if (tip < 1_000_000_000n)   return '#ffb74d' // orange < 1 gwei
+  return '#ff5252'                              // red    ≥ 1 gwei
+}
+
 function TxRow({ tx, baseFee, selected, onClick }: { tx: Transaction; baseFee: bigint; selected: boolean; onClick: () => void }) {
   const hasEth    = tx.value > 0n
   const hasTokens = tx.tokenFlows.length > 0
@@ -269,18 +293,25 @@ function TxRow({ tx, baseFee, selected, onClick }: { tx: Transaction; baseFee: b
         <SelectorTag selector={tx.methodSelector} />
       </div>
 
-      {/* Gas + fee */}
-      <div style={{ minWidth: 110, textAlign: 'right', flexShrink: 0, fontVariantNumeric: 'tabular-nums', lineHeight: 1.3 }}>
-        <div style={{ fontSize: 10, color: 'var(--text2)' }}>{formatGas(gasUsed)}</div>
-        <div style={{ fontSize: 9, color: tip > 0n ? 'var(--accent)' : 'var(--text3)' }}>+{formatGwei(tip)}</div>
+      {/* Token assets */}
+      <div className="flex-center gap4" style={{ width: 200, justifyContent: 'flex-end', flexShrink: 0, overflow: 'hidden' }}>
+        {hasTokens ? <TokenFlowBadges tokenFlows={tx.tokenFlows} /> : <span className="muted" style={{ fontSize: 10 }}>—</span>}
       </div>
 
-      {/* Flows summary */}
-      <div className="flex-center gap4" style={{ minWidth: 140, justifyContent: 'flex-end', flexShrink: 0, flexWrap: 'wrap' }}>
-        {hasEth    && <span className="badge amber">{formatEth(tx.value, 4)} ETH</span>}
-        {hasTokens && <TokenFlowBadges tokenFlows={tx.tokenFlows} />}
-        {hasDefi   && <span className="badge purple">{defiSummary(tx.protocols)}</span>}
-        {!hasEth && !hasTokens && !hasDefi && <span className="muted" style={{ fontSize: 10 }}>—</span>}
+      {/* DeFi actions */}
+      <div className="flex-center gap4" style={{ width: 70, justifyContent: 'flex-end', flexShrink: 0, overflow: 'hidden' }}>
+        {hasDefi ? <span className="badge purple">{defiSummary(tx.protocols)}</span> : <span className="muted" style={{ fontSize: 10 }}>—</span>}
+      </div>
+
+      {/* ETH value */}
+      <div className="flex-center gap4" style={{ width: 90, justifyContent: 'flex-end', flexShrink: 0, overflow: 'hidden' }}>
+        {hasEth ? <span className="badge amber">{formatEthAuto(tx.value)}</span> : <span className="muted" style={{ fontSize: 10 }}>—</span>}
+      </div>
+
+      {/* Gas + fee — fixed width, always at right edge */}
+      <div style={{ width: 80, textAlign: 'right', flexShrink: 0, fontVariantNumeric: 'tabular-nums', lineHeight: 1.3 }}>
+        <div style={{ fontSize: 10, color: 'var(--text2)' }}>{formatGas(gasUsed)}</div>
+        <div style={{ fontSize: 9, color: tipColor(tip) }}>+{formatGwei(tip)}</div>
       </div>
 
       {/* Tx explorer link — appears on row hover, far right */}
