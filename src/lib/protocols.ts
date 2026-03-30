@@ -231,3 +231,33 @@ export const COMPOUND3_SUPPLY_TOPIC   = '0xd1cf3d156d5f8f0d50f6c122ed609cec09d35
 export const COMPOUND3_WITHDRAW_TOPIC = '0x9b1bfa7fa9ee420a16e124f794c35ac9f90472acc99140eb2f6447c714cad8eb'
 // AbsorbDebt(address indexed absorber, address indexed borrower, uint256 basePaidOut, uint256 usdValue) — liquidation
 export const COMPOUND3_ABSORB_TOPIC   = '0x1547a878dc89ad3c367b6338b4be6a65a5dd74fb77ae044da1e8747ef1f4f62f'
+
+// ── Protocol brand colors ─────────────────────────────────────────────────
+// Shared across Histogram, ProtocolDrillDown, and any other component that
+// needs to color-code protocol names consistently.
+
+export const PROTOCOL_COLORS: Record<string, string> = {
+  // DEX — V3-style CL
+  'Uniswap V3':      '#ff007a',
+  'Aerodrome CL':    '#0052ff',  // Aerodrome brand blue
+  'PancakeSwap V3':  '#1fc7d4',
+  'SushiSwap V3':    '#fa52a0',
+  'BaseSwap V3':     '#4a90e2',
+  // DEX — V2-style AMM
+  'Uniswap V2':      '#ff6da0',
+  'Aerodrome':       '#0039b3',  // darker Aerodrome blue
+  'PancakeSwap V2':  '#18a8b3',
+  'SushiSwap V2':    '#e0478d',
+  'BaseSwap V2':     '#3a78c9',
+  // DEX — other
+  'Balancer V2':     '#aea8f5',
+  // Lending
+  'Aave V3':         '#b6509e',
+  'Seamless':        '#5f4def',
+  'Morpho Blue':     '#2470ff',
+  'Euler':           '#e040fb',
+  'Compound V3':     '#00d395',
+  'Moonwell':        '#7cfc00',
+  // Fallback
+  'Unknown':         '#555',
+}

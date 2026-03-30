@@ -6,7 +6,7 @@ import { bandPath, addrLabel } from '../lib/sankeyLayout'
 import { keyToHsl } from '../lib/colorize'
 import { shortAddr, formatGas } from '../lib/formatters'
 import { KNOWN_PROTOCOLS } from '../lib/protocols'
-import { detectFlashblocks, flashblockCount, effectivePriorityFee } from '../lib/flashblocks'
+import { flashblockCount, effectivePriorityFee } from '../lib/flashblocks'
 
 // ── Colors ─────────────────────────────────────────────────────────────────────
 
@@ -142,7 +142,7 @@ const MAX_SK_OPTIONS: Array<number | 'all'> = [20, 40, 80, 150, 'all']
 // ── Main component ─────────────────────────────────────────────────────────────
 
 export function BlockStateAccessView({ block, onSelectTx }: { block: Block; onSelectTx?: (hash: string | null) => void }) {
-  const { blockStateCache, startBlockStateTrace, tokenCache, fetchToken } = useStore()
+  const { blockStateCache, startBlockStateTrace, tokenCache, fetchToken, resolveFlashblocks } = useStore()
 
   const [metric,       setMetric]      = useState<Metric>('priority')
   const [sortOrder,    setSortOrder]   = useState<SortOrder>('index')
@@ -185,8 +185,8 @@ export function BlockStateAccessView({ block, onSelectTx }: { block: Block; onSe
   const progress = cache ? `${cache.done}/${cache.total}` : '0/0'
   const pct      = cache && cache.total > 0 ? cache.done / cache.total : 0
 
-  // ── Flashblock detection ─────────────────────────────────────────────────
-  const fbMap   = useMemo(() => detectFlashblocks(block.transactions, block.baseFeePerGas), [block.transactions, block.baseFeePerGas])
+  // ── Flashblock detection (stream data when available, else inferred) ─────
+  const fbMap   = useMemo(() => resolveFlashblocks(block.number, block.transactions, block.baseFeePerGas), [block.number, block.transactions, block.baseFeePerGas, resolveFlashblocks])
   const fbCount = flashblockCount(fbMap)
 
   // Subset of txResults visible in the selected flashblock(s)
@@ -206,6 +206,7 @@ export function BlockStateAccessView({ block, onSelectTx }: { block: Block; onSe
     if (!filteredTxResults) return []
     return aggregateKeys(filteredTxResults, effectiveStorageOnly)
   }, [filteredTxResults, effectiveStorageOnly])
+
 
   const topKeys = useMemo(() => (
     [...allKeyStats]
@@ -239,7 +240,7 @@ export function BlockStateAccessView({ block, onSelectTx }: { block: Block; onSe
   // Txs that have no meaningful writes (no slot writes, no ETH-transfer balance writes)
   const readOnlyTxs = useMemo(() => {
     if (!filteredTxResults) return new Set<string>()
-    const senderOf = new Map(block.transactions.map((tx) => [tx.hash, tx.from]))
+    const senderOf = new Map(block.transactions.map((tx) => [tx.hash, tx.from?.toLowerCase()]))
     const s = new Set<string>()
     for (const [hash, accesses] of filteredTxResults) {
       const sender = senderOf.get(hash)
@@ -654,12 +655,6 @@ export function BlockStateAccessView({ block, onSelectTx }: { block: Block; onSe
             <span>{parallelStats.conflictedTxs}/{parallelStats.totalTxs} conflicted</span>
           </span>
         )}
-        {!parallelStats && allKeyStats.length > 0 && (
-          <span style={{ marginLeft: 'auto' }}>
-            {allKeyStats.length} state keys · {allKeyStats.filter(k => k.writeCount > 1).length} contended writes
-          </span>
-        )}
-
         {isZoomed && (
           <button className="topbar-btn" style={{ fontSize: 8, padding: '1px 5px' }} onClick={resetZoom}>reset zoom</button>
         )}

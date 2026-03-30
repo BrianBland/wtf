@@ -57,49 +57,73 @@ const EXCLUDED_ADDRS = new Set([
  *  - Account in post with balance/nonce delta → account-level WRITE
  *  - Everything else touched in allAccesses   → READ
  */
+/** Normalize a storage slot key to canonical 32-byte padded hex ("0x" + 64 hex chars).
+ *  Different RPC implementations return slots in different formats — some pad to 32 bytes,
+ *  others strip leading zeros (e.g. "0x1" vs "0x0000...0001").  Normalizing both sides
+ *  before comparison prevents writes from being classified as reads due to format mismatch.
+ */
+function normalizeSlot(slot: string): string {
+  return '0x' + slot.toLowerCase().replace(/^0x/, '').padStart(64, '0')
+}
+
 export function mergePrestate(
   allAccesses: PrestateResult,
   diff: PrestateDiffResult,
 ): StateAccess[] {
   const result: StateAccess[] = []
 
-  // Build write sets from diff.post
+  // Build write sets from diff.post (normalized slot keys)
   const writtenAccounts = new Set<string>()
-  const writtenSlots    = new Map<string, Set<string>>() // addr → set of slots
+  const writtenSlots    = new Map<string, Set<string>>() // addr → set of normalized slots
 
   for (const [rawAddr, postAcc] of Object.entries(diff.post ?? {})) {
     const addr = rawAddr.toLowerCase()
-    // Account-level write: balance or nonce changed
     if (postAcc.balance !== undefined || postAcc.nonce !== undefined) {
       writtenAccounts.add(addr)
     }
-    // Storage writes
     if (postAcc.storage) {
       if (!writtenSlots.has(addr)) writtenSlots.set(addr, new Set())
       for (const slot of Object.keys(postAcc.storage)) {
-        writtenSlots.get(addr)!.add(slot.toLowerCase())
+        writtenSlots.get(addr)!.add(normalizeSlot(slot))
       }
     }
   }
+
+  // Emit accesses for everything in allAccesses
+  const emittedSlotKeys = new Set<string>()
 
   for (const [rawAddr, acc] of Object.entries(allAccesses ?? {})) {
     const addr = rawAddr.toLowerCase()
     if (addr === ZERO_ADDR) continue
     if (EXCLUDED_ADDRS.has(addr)) continue
 
-    // Account-level access
-    const acctKey  = addr
     const acctType: 'read' | 'write' = writtenAccounts.has(addr) ? 'write' : 'read'
-    result.push({ key: acctKey, addr, type: acctType })
+    result.push({ key: addr, addr, type: acctType })
 
-    // Storage accesses
     if (acc.storage) {
       const wSlots = writtenSlots.get(addr)
       for (const rawSlot of Object.keys(acc.storage)) {
-        const slot    = rawSlot.toLowerCase()
+        const slot    = normalizeSlot(rawSlot)
         const slotKey = `${addr}::${slot}`
         const type: 'read' | 'write' = wSlots?.has(slot) ? 'write' : 'read'
         result.push({ key: slotKey, addr, slot, type })
+        emittedSlotKeys.add(slotKey)
+      }
+    }
+  }
+
+  // Also capture writes that appear only in diff.post but not in allAccesses.
+  // This covers slots written for the first time (prestate shows nothing for them)
+  // and any RPC inconsistency where diff lists more slots than prestate.
+  for (const [rawAddr, postAcc] of Object.entries(diff.post ?? {})) {
+    const addr = rawAddr.toLowerCase()
+    if (addr === ZERO_ADDR || EXCLUDED_ADDRS.has(addr)) continue
+    if (!postAcc.storage) continue
+    for (const rawSlot of Object.keys(postAcc.storage)) {
+      const slot    = normalizeSlot(rawSlot)
+      const slotKey = `${addr}::${slot}`
+      if (!emittedSlotKeys.has(slotKey)) {
+        result.push({ key: slotKey, addr, slot, type: 'write' })
       }
     }
   }

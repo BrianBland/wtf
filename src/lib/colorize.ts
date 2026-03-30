@@ -63,8 +63,9 @@ export function hexColors(key: string): { bg: string; text: string } {
   return { bg, text: contrastColor(bg) }
 }
 
-/** Protocol type → color mapping */
-export const PROTOCOL_COLORS: Record<string, string> = {
+/** Protocol type-category → color mapping (dex/lending/token/…).
+ *  For per-protocol brand colors keyed by name, see PROTOCOL_COLORS in lib/protocols.ts. */
+export const PROTOCOL_TYPE_COLORS: Record<string, string> = {
   dex:     '#00e5ff',
   lending: '#ff9100',
   token:   '#69f0ae',

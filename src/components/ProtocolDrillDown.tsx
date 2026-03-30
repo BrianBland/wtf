@@ -4,7 +4,7 @@ import { buildPoolActivity, groupByProtocol, PoolSummary } from '../lib/poolActi
 import { useStore, Store } from '../store'
 import { shortAddr, formatAmount, formatEth } from '../lib/formatters'
 import { hexColors } from '../lib/colorize'
-import { KNOWN_TOKENS, KNOWN_PROTOCOLS } from '../lib/protocols'
+import { KNOWN_TOKENS, KNOWN_PROTOCOLS, PROTOCOL_COLORS } from '../lib/protocols'
 import { PoolMeta } from '../lib/poolFetch'
 import { PoolFlowView } from './PoolFlowView'
 
@@ -144,32 +144,6 @@ function PoolRow({
 }
 
 // ── Protocol section ──────────────────────────────────────────────────────
-
-const PROTOCOL_COLORS: Record<string, string> = {
-  // DEX — V3-style CL
-  'Uniswap V3':      '#ff007a',
-  'Aerodrome CL':    '#00c4e0',
-  'PancakeSwap V3':  '#1fc7d4',
-  'SushiSwap V3':    '#fa52a0',
-  'BaseSwap V3':     '#4a90e2',
-  // DEX — V2-style AMM
-  'Uniswap V2':      '#ff6da0',
-  'Aerodrome':       '#0091b5',
-  'PancakeSwap V2':  '#18a8b3',
-  'SushiSwap V2':    '#e0478d',
-  'BaseSwap V2':     '#3a78c9',
-  // DEX — other
-  'Balancer V2':     '#aea8f5',
-  // Lending
-  'Aave V3':         '#b6509e',
-  'Seamless':        '#5f4def',
-  'Morpho Blue':     '#2470ff',
-  'Euler':           '#e040fb',
-  'Compound V3':     '#00d395',
-  'Moonwell':        '#7cfc00',
-  // Fallback
-  'Unknown':         'var(--text3)',
-}
 
 function ProtocolSection({
   protocol,

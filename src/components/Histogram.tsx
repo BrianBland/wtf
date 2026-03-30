@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { hexColors } from '../lib/colorize'
-import { KNOWN_TOKENS, KNOWN_PROTOCOLS, KNOWN_SELECTORS } from '../lib/protocols'
+import { KNOWN_TOKENS, KNOWN_PROTOCOLS, KNOWN_SELECTORS, PROTOCOL_COLORS } from '../lib/protocols'
 import { shortAddr, formatPercent, formatNumber, formatGas } from '../lib/formatters'
 import { AggMetric } from '../lib/aggregations'
 
@@ -65,7 +65,7 @@ export function Histogram({ entries, type = 'address', maxRows = 8, onSelect, se
         const val      = sortBy === 'gas' ? gas : count
         const total    = sortBy === 'gas' ? totalGas : totalCount
         const pct      = val / (maxVal || 1)
-        const { bg }   = hexColors(key)
+        const bg       = (type === 'other' ? PROTOCOL_COLORS[key] : undefined) ?? hexColors(key).bg
         const isActive = selectedKey === key
         const label_   = resolveLabel(key, type)
 

@@ -7,13 +7,60 @@ import { ProtocolDrillDown } from './ProtocolDrillDown'
 import { MetaSankeyView } from './MetaSankeyView'
 import { formatGas, formatGwei, formatNumber, formatTimestamp, gasColor } from '../lib/formatters'
 import { KNOWN_PROTOCOLS } from '../lib/protocols'
-import { keyToHsl } from '../lib/colorize'
 
 // ── Sparkline ─────────────────────────────────────────────────────────────
 
+/**
+ * Color a sparkline bar by gas utilization.
+ *
+ *  [0, target]:          purple (280°) → green (130°)   below target, baseFee falling
+ *  [target, target×2]:   green (130°) → yellow (60°)    over target, baseFee rising
+ *  [target×2, 1]:        yellow (60°) → red (0°)        heavy load (only when elasticity ≥ 2)
+ *
+ * `target` = 1/elasticity (e.g. 1/6 ≈ 0.167 for Base/OP Stack)
+ * Small sat/lightness variance by block number keeps adjacent bars distinct.
+ * Optional `chunkIndex` shifts lightness so stacked chunks are visually separated.
+ */
+function sparkBarColor(
+  gasRatio:   number,
+  blockNumber: number,
+  target:     number,
+  elasticity: number,
+  chunkIndex?: number,
+): string {
+  let hue: number
+  const t0 = Math.max(target, 0.001)
+  if (gasRatio <= target) {
+    // purple (280°) → green (130°)
+    hue = 280 - (gasRatio / t0) * 150
+  } else if (elasticity >= 2 && gasRatio < target * 2) {
+    // green (130°) → yellow (60°)
+    hue = 130 - ((gasRatio - target) / t0) * 70
+  } else {
+    // yellow (60°) → red (0°)
+    const lo = elasticity >= 2 ? target * 2 : target
+    const t  = Math.min(1, (gasRatio - lo) / Math.max(0.001, 1 - lo))
+    hue = 60 * (1 - t)
+  }
+  const cycle  = blockNumber % 4
+  const sat    = 68 + (cycle & 1) * 14        // 68% or 82%
+  const baseLit = 46 + (cycle >> 1) * 10      // 46% or 56%
+  const litAdj = chunkIndex !== undefined ? (chunkIndex % 2) * 8 : 0
+  return `hsl(${hue.toFixed(0)},${sat}%,${(baseLit + litAdj)}%)`
+}
+
 function Sparkline({ blocks, onSelect, metric }: { blocks: Block[]; onSelect: (n: number) => void; metric: AggMetric }) {
+  const liveFlashblocks = useStore((s) => s.liveFlashblocks)
+  const chainElasticity = useStore((s) => s.chainElasticity)
+  const target = 1 / chainElasticity
+
   const getValue = (b: Block) => metric === 'gas' ? Number(b.gasUsed) : b.transactions.length
-  const maxVal   = Math.max(...blocks.map(getValue), 1)
+
+  const liveVal = liveFlashblocks
+    ? (metric === 'gas' ? Number(liveFlashblocks.totalGasUsed) : liveFlashblocks.totalTxCount)
+    : 0
+  const maxVal = Math.max(...blocks.map(getValue), liveVal, 1)
+
   const [hovered, setHovered] = useState<{ block: Block; x: number } | null>(null)
   const containerRef = useRef<HTMLDivElement>(null)
 
@@ -25,13 +72,14 @@ function Sparkline({ blocks, onSelect, metric }: { blocks: Block[]; onSelect: (n
       onMouseLeave={() => setHovered(null)}
     >
       {blocks.map((block) => {
-        const v = getValue(block)
-        const h = Math.max(2, Math.round((v / maxVal) * 32))
+        const v        = getValue(block)
+        const h        = Math.max(2, Math.round((v / maxVal) * 32))
+        const gasRatio = Number(block.gasUsed) / Number(block.gasLimit || 1)
         return (
           <div
             key={block.number}
             className="spark-bar"
-            style={{ height: h, background: keyToHsl(block.hash) }}
+            style={{ height: h, background: sparkBarColor(gasRatio, block.number, target, chainElasticity) }}
             onClick={() => onSelect(block.number)}
             onMouseEnter={(e) => {
               const rect = containerRef.current?.getBoundingClientRect()
@@ -40,6 +88,54 @@ function Sparkline({ blocks, onSelect, metric }: { blocks: Block[]; onSelect: (n
           />
         )
       })}
+
+      {/* Live block being built via flashblock stream */}
+      {liveFlashblocks && (() => {
+        const lv = liveVal
+        const h  = Math.max(2, Math.round((lv / maxVal) * 32))
+        const gasLimit = Number(liveFlashblocks.gasLimit || 1n)
+        const chunks   = liveFlashblocks.chunks
+
+        // Per-chunk segments: height proportional to each chunk's contribution
+        let cumGas = 0n
+        const segments = chunks.map((chunk, i) => {
+          cumGas += chunk.gasUsed
+          const cumRatio = Number(cumGas) / gasLimit
+          const frac = metric === 'gas'
+            ? Number(chunk.gasUsed) / Math.max(Number(liveFlashblocks.totalGasUsed), 1)
+            : chunk.txCount / Math.max(liveFlashblocks.totalTxCount, 1)
+          return { frac, color: sparkBarColor(cumRatio, liveFlashblocks.blockNumber, target, chainElasticity, i) }
+        })
+
+        return (
+          <div
+            key="live"
+            className="spark-bar"
+            style={{
+              height: h,
+              display: 'flex',
+              flexDirection: 'column',
+              justifyContent: 'flex-end',
+              overflow: 'hidden',
+              opacity: 0.85,
+              outline: '1px solid var(--accent)',
+              outlineOffset: -1,
+            }}
+            title={`#${liveFlashblocks.blockNumber} building… (${chunks.length} flashblocks, ${Math.round(Number(liveFlashblocks.totalGasUsed) / 1e6)}M gas)`}
+          >
+            {segments.map(({ frac, color }, i) => (
+              <div
+                key={i}
+                style={{
+                  flex: `0 0 ${(frac * 100).toFixed(1)}%`,
+                  background: color,
+                  borderTop: i > 0 ? '1px solid rgba(0,0,0,0.15)' : undefined,
+                }}
+              />
+            ))}
+          </div>
+        )
+      })()}
 
       {hovered && (() => {
         const b = hovered.block
@@ -154,13 +250,17 @@ function SummaryStats({ blocks }: { blocks: Block[] }) {
 // ── Main view ─────────────────────────────────────────────────────────────
 
 export function BlockRangeView() {
-  const { getSortedBlocks, goto } = useStore()
+  const blocksMap = useStore((s) => s.blocks)
+  const goto      = useStore((s) => s.goto)
   const [sparkMetric, setSparkMetric] = useState<AggMetric>('txs')
   const [sortBy, setSortBy] = useState<SortKey>('txs')
   const [col4, setCol4] = useState<'methods' | 'activity'>('methods')
   const [showSankey,    setShowSankey]    = useState(false)
   const [sankeyExpanded, setSankeyExpanded] = useState(false)
-  const blocks = getSortedBlocks()
+  const blocks = useMemo(
+    () => [...blocksMap.values()].sort((a, b) => a.number - b.number),
+    [blocksMap]
+  )
   const { senders, recipients, selectors, protocols } = useMemo(
     () => buildHistograms(blocks),
     [blocks]

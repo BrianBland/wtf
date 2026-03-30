@@ -13,6 +13,17 @@ import { decodeCalldata, DecodedValue, DecodedParam } from '../lib/calldataDecod
 
 // ── Decoded calldata view ─────────────────────────────────────────────────
 
+// Muted but distinct palette for ABI word slots — cycles by index so
+// adjacent words always differ, without relying on per-value hashing.
+const WORD_COLORS = [
+  '#8aabcc', // muted blue
+  '#7aaa8a', // muted green
+  '#c49a70', // muted orange
+  '#9a88b8', // muted purple
+  '#5a9898', // muted teal
+  '#b0a060', // muted amber
+]
+
 function DecodedValueDisplay({ value, type }: { value: DecodedValue; type: string }) {
   switch (value.kind) {
     case 'address':
@@ -70,18 +81,25 @@ function DecodedTupleDisplay({ fields }: { fields: DecodedParam[] }) {
 export function DecodedCallView({ input, selector }: { input: string; selector: string }) {
   const decoded = decodeCalldata(input, selector)
 
+  // Slice calldata body (after 4-byte selector) into 32-byte (64 hex char) words
+  const calldataBody = input.slice(10) // drop '0x' + 8 selector chars
+  const words: string[] = []
+  for (let i = 0; i < calldataBody.length; i += 64) words.push(calldataBody.slice(i, i + 64))
+
   const rawCalldata = (
-    <details>
+    <details open>
       <summary style={{ cursor: 'pointer', fontSize: 9, color: 'var(--text3)', padding: '2px 12px', userSelect: 'none' }}>
         raw calldata ({Math.floor((input.length - 2) / 2)} bytes)
       </summary>
       <div style={{
-        fontSize: 10, color: 'var(--text2)', wordBreak: 'break-all', lineHeight: 1.8,
+        fontSize: 10, wordBreak: 'break-all', lineHeight: 2,
         fontFamily: 'var(--font-mono)', background: 'var(--surface2)',
         padding: '6px 12px', borderTop: '1px solid var(--border)',
       }}>
         <span style={{ color: 'var(--purple)' }}>{input.slice(0, 10)}</span>
-        {input.slice(10)}
+        {words.map((word, i) => (
+          <span key={i} style={{ color: WORD_COLORS[i % WORD_COLORS.length] }}>{word}</span>
+        ))}
       </div>
     </details>
   )
@@ -469,8 +487,7 @@ export function TxView({ txHash, blockNumber }: { txHash: string; blockNumber: n
                       raw calldata
                     </summary>
                     <div style={{
-                      fontSize: 10, color: 'var(--text2)',
-                      wordBreak: 'break-all', lineHeight: 1.8,
+                      fontSize: 10, wordBreak: 'break-all', lineHeight: 2,
                       fontFamily: 'var(--font-mono)',
                       background: 'var(--surface2)',
                       padding: '8px 10px',
@@ -478,7 +495,9 @@ export function TxView({ txHash, blockNumber }: { txHash: string; blockNumber: n
                       border: '1px solid var(--border)',
                     }}>
                       <span style={{ color: 'var(--purple)' }}>{tx.input.slice(0, 10)}</span>
-                      {tx.input.slice(10)}
+                      {tx.input.slice(10).match(/.{1,64}/g)?.map((word, i) => (
+                        <span key={i} style={{ color: WORD_COLORS[i % WORD_COLORS.length] }}>{word}</span>
+                      ))}
                     </div>
                   </details>
                 </>

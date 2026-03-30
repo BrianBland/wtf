@@ -15,8 +15,8 @@ import { CallAggregationsView } from './CallAggregationsView'
 import { DecodedCallView } from './TxView'
 import { KNOWN_TOKENS, KNOWN_PROTOCOLS, KNOWN_SELECTORS } from '../lib/protocols'
 import { formatEth, formatGas, formatGwei, formatTimestamp, formatAge, formatNumber, shortHash } from '../lib/formatters'
-import { detectFlashblocks, flashblockCount } from '../lib/flashblocks'
-import { computeParallelization } from '../lib/stateAccess'
+import { flashblockCount, effectivePriorityFee } from '../lib/flashblocks'
+import { computeParallelization, aggregateKeys } from '../lib/stateAccess'
 
 // ── DeFi action glyphs ────────────────────────────────────────────────────
 
@@ -240,10 +240,12 @@ function TokenFlowBadges({ tokenFlows }: { tokenFlows: TokenFlow[] }) {
   )
 }
 
-function TxRow({ tx, selected, onClick }: { tx: Transaction; selected: boolean; onClick: () => void }) {
+function TxRow({ tx, baseFee, selected, onClick }: { tx: Transaction; baseFee: bigint; selected: boolean; onClick: () => void }) {
   const hasEth    = tx.value > 0n
   const hasTokens = tx.tokenFlows.length > 0
   const hasDefi   = tx.protocols.length > 0
+  const gasUsed   = tx.gasUsed ?? tx.gas
+  const tip       = effectivePriorityFee(tx, baseFee)
 
   return (
     <div className={`data-row ${selected ? 'selected' : ''}`} onClick={onClick}>
@@ -265,6 +267,12 @@ function TxRow({ tx, selected, onClick }: { tx: Transaction; selected: boolean; 
           : <span className="badge muted">deploy</span>}
         <span className="muted" style={{ fontSize: 9, flexShrink: 0 }}>·</span>
         <SelectorTag selector={tx.methodSelector} />
+      </div>
+
+      {/* Gas + fee */}
+      <div style={{ minWidth: 110, textAlign: 'right', flexShrink: 0, fontVariantNumeric: 'tabular-nums', lineHeight: 1.3 }}>
+        <div style={{ fontSize: 10, color: 'var(--text2)' }}>{formatGas(gasUsed)}</div>
+        <div style={{ fontSize: 9, color: tip > 0n ? 'var(--accent)' : 'var(--text3)' }}>+{formatGwei(tip)}</div>
       </div>
 
       {/* Flows summary */}
@@ -409,10 +417,20 @@ function CollapsibleStateAccess({ block, onSelectTx }: { block: Block; onSelectT
   const { ref, isFullscreen, toggle: toggleFullscreen } = useFullscreen()
   const cache = blockStateCache.get(block.number)
   const running = cache?.status === 'running'
+  const keyBreakdown = useMemo(() => {
+    if (cache?.status !== 'done') return null
+    const all = aggregateKeys(cache.txResults, false)
+    return {
+      accRead:   all.filter(k => !k.slot && k.readCount  > 0).length,
+      accWrite:  all.filter(k => !k.slot && k.writeCount > 0).length,
+      slotRead:  all.filter(k =>  k.slot && k.readCount  > 0).length,
+      slotWrite: all.filter(k =>  k.slot && k.writeCount > 0).length,
+    }
+  }, [cache])
   const subtitle = running
     ? `${cache.done}/${cache.total} traced…`
-    : cache?.status === 'done'
-      ? `${cache.txResults.size} txs traced`
+    : keyBreakdown
+      ? `${cache!.txResults.size} txs · ${keyBreakdown.accRead}a/${keyBreakdown.slotRead}s read · ${keyBreakdown.accWrite}a/${keyBreakdown.slotWrite}s written`
       : 'click to trace'
 
   return (
@@ -525,8 +543,9 @@ function CollapsibleMetaSankey({ block }: { block: Block }) {
   const [expanded, setExpanded] = useState(false)
   const [selectedFBs, setSelectedFBs] = useState(() => new Set<number>())
   const { ref, isFullscreen, toggle: toggleFullscreen } = useFullscreen()
+  const resolveFlashblocks = useStore((s) => s.resolveFlashblocks)
 
-  const fbMap   = useMemo(() => detectFlashblocks(block.transactions, block.baseFeePerGas), [block.transactions, block.baseFeePerGas])
+  const fbMap   = useMemo(() => resolveFlashblocks(block.number, block.transactions, block.baseFeePerGas), [block.number, block.transactions, block.baseFeePerGas, resolveFlashblocks])
   const fbCount = flashblockCount(fbMap)
 
   const filteredBlock = useMemo(() => {
@@ -948,6 +967,7 @@ export function BlockView({ blockNumber }: { blockNumber: number }) {
             <div key={tx.hash} data-txhash={tx.hash}>
               <TxRow
                 tx={tx}
+                baseFee={block.baseFeePerGas}
                 selected={tx.hash === selectedTx}
                 onClick={() => setSelectedTx(tx.hash === selectedTx ? null : tx.hash)}
               />

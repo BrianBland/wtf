@@ -1,4 +1,4 @@
-import { Transaction } from '../types'
+import { Transaction, FlashblockChunk } from '../types'
 
 /**
  * Effective priority fee per gas for a transaction given the block base fee.
@@ -45,6 +45,34 @@ export function detectFlashblocks(txs: Transaction[], baseFee: bigint): Map<stri
     prevFee = fee
   }
 
+  return result
+}
+
+/**
+ * Build a tx-hash → flashblock-index map from streamed chunk boundaries.
+ *
+ * Chunks record per-chunk tx counts (NOT cumulative). Transactions are
+ * assumed to be in block order (ascending index). Any txs not covered by
+ * the chunk list (e.g. appended after the last received flashblock) are
+ * assigned to the last chunk's index.
+ */
+export function flashblockMapFromChunks(
+  txs: Transaction[],
+  chunks: FlashblockChunk[],
+): Map<string, number> {
+  const result = new Map<string, number>()
+  let txIdx = 0
+  for (const chunk of chunks) {
+    for (let i = 0; i < chunk.txCount && txIdx < txs.length; i++, txIdx++) {
+      result.set(txs[txIdx].hash, chunk.index)
+    }
+  }
+  // Remaining txs (if stream was incomplete) → last chunk's index
+  const lastFb = chunks.length > 0 ? chunks[chunks.length - 1].index : 0
+  while (txIdx < txs.length) {
+    result.set(txs[txIdx].hash, lastFb)
+    txIdx++
+  }
   return result
 }
 

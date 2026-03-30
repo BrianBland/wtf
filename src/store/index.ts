@@ -2,6 +2,7 @@ import { create } from 'zustand'
 import {
   Block, Transaction, Log, TokenFlow, ProtocolEvent,
   CallTrace, NavState, RawBlock, RawLog, RawReceipt,
+  FlashblockChunk, LiveFlashblockState,
 } from '../types'
 import {
   BlockStateProgress, PrestateResult, PrestateDiffResult, mergePrestate,
@@ -31,6 +32,9 @@ import {
   topicToAddress, decodeUint256, decodeInt256,
 } from '../lib/formatters'
 import { RpcClient } from '../lib/rpc'
+import { makeFlashblockHandler } from '../lib/flashblockStream'
+import { detectFlashblocks, flashblockMapFromChunks } from '../lib/flashblocks'
+import { estimateElasticity } from '../lib/chainParams'
 
 const MAX_BLOCKS = 200
 
@@ -457,6 +461,16 @@ interface Store {
   ethPriceUSD: number
   btcPriceUSD: number
   fetchPrices: () => void
+
+  // Chain parameters (fetched at startup via eth_chainId)
+  chainElasticity: number  // EIP-1559 elasticity multiplier (typically 2 or 6)
+
+  // Flashblock streaming
+  liveFlashblocks:   LiveFlashblockState | null
+  flashblockHistory: Map<number, FlashblockChunk[]>  // blockNumber → per-chunk data
+
+  // Resolve flashblock assignments: uses stream data when available, falls back to detection
+  resolveFlashblocks: (blockNumber: number, txs: Transaction[], baseFee: bigint) => Map<string, number>
 }
 
 export type { Store }
@@ -475,6 +489,9 @@ export const useStore = create<Store>((set, get) => ({
   },
 
   client: null, connected: false, connecting: false, connError: null,
+  chainElasticity: 6,
+  liveFlashblocks: null,
+  flashblockHistory: new Map(),
 
   connect: async () => {
     const { rpcUrl } = get()
@@ -558,6 +575,8 @@ export const useStore = create<Store>((set, get) => ({
         Array.from({ length: latest - start + 1 }, (_, i) => fetchBlock(start + i))
       )
       set({ initialized: true, latestBlock: latest })
+      // Estimate EIP-1559 elasticity from the initial block sample
+      set({ chainElasticity: estimateElasticity(get().getSortedBlocks()) })
     } catch (e) {
       // eth_blockNumber itself failed — mark initialized so UI doesn't hang
       set({ initialized: true, connError: `Initial sync failed: ${(e as Error).message}` })
@@ -568,6 +587,18 @@ export const useStore = create<Store>((set, get) => ({
       await client.subscribe<{ number: string; hash: string }>(
         'newHeads', null, async (header) => {
           try {
+            // Seal live flashblock state into history if it matches this block
+            const live = get().liveFlashblocks
+            const headN = hexToNumber(header.number)
+            if (live?.blockNumber === headN) {
+              set((s) => {
+                const h = new Map(s.flashblockHistory)
+                h.set(live.blockNumber, live.chunks)
+                if (h.size > MAX_BLOCKS) h.delete(Math.min(...h.keys()))
+                return { flashblockHistory: h, liveFlashblocks: null }
+              })
+            }
+
             const hexN = header.number
             const [raw, rawLogs, rawReceipts] = await Promise.all([
               client.call<RawBlock>('eth_getBlockByNumber', [hexN, true]),
@@ -596,11 +627,18 @@ export const useStore = create<Store>((set, get) => ({
     } catch (e) {
       set({ connError: `Subscription failed: ${(e as Error).message}` })
     }
+
+    // Phase 4: Subscribe to flashblocks (non-critical — endpoint may not support it)
+    try {
+      await client.subscribe('newFlashblocks', null, makeFlashblockHandler(
+        (state) => set({ liveFlashblocks: state }),
+      ))
+    } catch { /* silently skip if unsupported */ }
   },
 
   disconnect: () => {
     get().client?.close()
-    set({ client: null, connected: false, blocks: new Map(), latestBlock: null, initialized: false })
+    set({ client: null, connected: false, blocks: new Map(), latestBlock: null, initialized: false, liveFlashblocks: null })
   },
 
   blocks: new Map(), latestBlock: null, initialized: false, blockLoading: new Set(),
@@ -748,6 +786,12 @@ export const useStore = create<Store>((set, get) => ({
   getPool: (address) => {
     const entry = get().poolCache.get(address)
     return typeof entry === 'object' ? entry : undefined
+  },
+
+  resolveFlashblocks: (blockNumber, txs, baseFee) => {
+    const chunks = get().flashblockHistory.get(blockNumber)
+    if (chunks) return flashblockMapFromChunks(txs, chunks)
+    return detectFlashblocks(txs, baseFee)
   },
 
   blockStateCache: new Map(),
