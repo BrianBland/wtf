@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react'
 import { hexColors, keyToHsl, contrastColor } from '../lib/colorize'
-import { KNOWN_TOKENS, KNOWN_PROTOCOLS, KNOWN_SELECTORS } from '../lib/protocols'
+import { KNOWN_TOKENS, KNOWN_PROTOCOLS, KNOWN_SELECTORS, KNOWN_TOPICS } from '../lib/protocols'
 import { shortAddr } from '../lib/formatters'
 import { useStore } from '../store'
+import { getCachedSelector, getCachedEventTopic, lookupSelector, lookupEventTopic } from '../lib/fourByte'
 
 interface HexTagProps {
   value: string
@@ -12,6 +13,7 @@ interface HexTagProps {
   copyable?: boolean
   className?: string
   title?: string
+  label?: string    // override the displayed text
 }
 
 function getLabel(value: string, type: HexTagProps['type']): string {
@@ -29,10 +31,10 @@ function getLabel(value: string, type: HexTagProps['type']): string {
 }
 
 export function HexTag({
-  value, type = 'address', muted = false, copyable = true, className = '', title,
+  value, type = 'address', muted = false, copyable = true, className = '', title, label: labelProp,
 }: HexTagProps) {
   const [copied, setCopied] = useState(false)
-  const label = getLabel(value, type)
+  const label = labelProp ?? getLabel(value, type)
   const { bg, text } = muted ? { bg: 'var(--surface3)', text: 'var(--text2)' } : hexColors(value)
 
   const handleClick = (e: React.MouseEvent) => {
@@ -56,16 +58,70 @@ export function HexTag({
   )
 }
 
-/** Show a method selector, falling back to first N chars if unknown */
+/** Show a method selector. Looks up unknown selectors on 4byte.directory. */
 export function SelectorTag({ selector }: { selector: string | null }) {
   if (!selector) return <span className="muted">—</span>
   const known = KNOWN_SELECTORS[selector]
+  if (known) {
+    return <HexTag value={selector} type="selector" title={`${selector} → ${known}`} />
+  }
+  return <DynamicSelectorTag selector={selector} />
+}
+
+function DynamicSelectorTag({ selector }: { selector: string }) {
+  const [resolved, setResolved] = useState<string | null>(
+    () => {
+      const cached = getCachedSelector(selector)
+      return typeof cached === 'string' ? cached : null
+    },
+  )
+
+  useEffect(() => {
+    if (getCachedSelector(selector) !== undefined) return
+    lookupSelector(selector).then((result) => { if (result) setResolved(result) })
+  }, [selector])
+
+  const name = resolved?.split('(')[0]
   return (
     <HexTag
       value={selector}
       type="selector"
-      title={`${selector}${known ? ` → ${known}` : ''}`}
+      label={name}
+      title={resolved ? `${selector} → ${resolved}` : selector}
     />
+  )
+}
+
+/** Show an event topic hash (topic[0]). Looks up unknown topics on 4byte.directory. */
+export function TopicTag({ topic }: { topic: string }) {
+  const known = KNOWN_TOPICS[topic]
+  if (known) {
+    return <span className="badge muted" title={topic}>{known}</span>
+  }
+  return <DynamicTopicTag topic={topic} />
+}
+
+function DynamicTopicTag({ topic }: { topic: string }) {
+  const [resolved, setResolved] = useState<string | null>(
+    () => {
+      const cached = getCachedEventTopic(topic)
+      return typeof cached === 'string' ? cached : null
+    },
+  )
+
+  useEffect(() => {
+    if (getCachedEventTopic(topic) !== undefined) return
+    lookupEventTopic(topic).then((result) => { if (result) setResolved(result) })
+  }, [topic])
+
+  const name = resolved?.split('(')[0]
+  if (name) {
+    return <span className="badge muted" title={resolved ?? topic}>{name}</span>
+  }
+  return (
+    <span className="muted" style={{ fontSize: 9, fontFamily: 'var(--font-mono)' }}>
+      {topic.slice(0, 10)}…
+    </span>
   )
 }
 

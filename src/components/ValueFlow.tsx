@@ -1,3 +1,4 @@
+import { useEffect } from 'react'
 import { TokenFlow, EthFlow, ProtocolEvent } from '../types'
 import { KNOWN_TOKENS } from '../lib/protocols'
 import { ACTION_COLORS } from '../lib/colorize'
@@ -5,6 +6,7 @@ import { formatAmount, formatEth, shortAddr } from '../lib/formatters'
 import { HexTag, TokenBadge } from './HexTag'
 import { useStore } from '../store'
 import { TokenDetails } from '../lib/tokenFetch'
+import { PoolMeta } from '../lib/poolFetch'
 
 type ResolvedToken = { symbol: string; decimals: number; color?: string }
 
@@ -117,7 +119,16 @@ export function EthFlowList({ flows }: { flows: EthFlow[] }) {
 // ── Protocol event pills ──────────────────────────────────────────────────
 
 export function ProtocolEventList({ events }: { events: ProtocolEvent[] }) {
-  const { tokenCache } = useStore()
+  const { tokenCache, poolCache, fetchPool } = useStore()
+
+  // Ensure pool metadata is fetched for any LP/Swap events referencing a pool
+  useEffect(() => {
+    for (const ev of events) {
+      const pool = ev.extra?.pool as string | undefined
+      if (pool && !poolCache.has(pool.toLowerCase())) fetchPool(pool.toLowerCase())
+    }
+  }, [events, poolCache, fetchPool])
+
   if (events.length === 0) return null
 
   return (
@@ -126,6 +137,41 @@ export function ProtocolEventList({ events }: { events: ProtocolEvent[] }) {
         const color  = ACTION_COLORS[ev.action] ?? 'var(--text2)'
         const token  = ev.token  ? resolveToken(ev.token,  tokenCache) : null
         const token2 = ev.token2 ? resolveToken(ev.token2, tokenCache) : null
+
+        // Resolve pool metadata for pool-based events (swaps and LP)
+        const poolAddr = ev.extra?.pool ? (ev.extra.pool as string).toLowerCase() : null
+        const poolEntry = poolAddr ? poolCache.get(poolAddr) : undefined
+        const poolMeta = typeof poolEntry === 'object' ? poolEntry as PoolMeta : null
+        const tok0 = poolMeta ? resolveToken(poolMeta.token0, tokenCache) : null
+        const tok1 = poolMeta ? resolveToken(poolMeta.token1, tokenCache) : null
+
+        // Swap details: derive in/out from pool token pair + amounts
+        const isSwap = ev.action === 'Swap'
+        let swapIn:  { tok: ReturnType<typeof resolveToken>; amt: bigint } | null = null
+        let swapOut: { tok: ReturnType<typeof resolveToken>; amt: bigint } | null = null
+        if (isSwap && poolMeta) {
+          const a0str = ev.extra?.amount0 as string | undefined
+          const a1str = ev.extra?.amount1 as string | undefined
+          if (a0str !== undefined && a1str !== undefined) {
+            // V3-style: signed int256 — positive = into pool (user sold), negative = out of pool (user received)
+            const a0 = BigInt(a0str), a1 = BigInt(a1str)
+            if (a0 > 0n) { swapIn = { tok: tok0, amt: a0 };  swapOut = { tok: tok1, amt: -a1 } }
+            else          { swapIn = { tok: tok1, amt: a1 };  swapOut = { tok: tok0, amt: -a0 } }
+          } else {
+            // V2-style: separate in/out slots
+            const a0In  = BigInt((ev.extra?.amount0In  as string | undefined) ?? '0')
+            const a1In  = BigInt((ev.extra?.amount1In  as string | undefined) ?? '0')
+            const a0Out = BigInt((ev.extra?.amount0Out as string | undefined) ?? '0')
+            const a1Out = BigInt((ev.extra?.amount1Out as string | undefined) ?? '0')
+            if (a0In > 0n) { swapIn = { tok: tok0, amt: a0In };  swapOut = { tok: tok1, amt: a1Out } }
+            else            { swapIn = { tok: tok1, amt: a1In };  swapOut = { tok: tok0, amt: a0Out } }
+          }
+        }
+
+        // LP / fee-collection details: amount0/amount1 in extra, mapped to pool tokens
+        const isLp = ev.action === 'AddLiquidity' || ev.action === 'RemoveLiquidity' || ev.action === 'CollectFees'
+        const lpAmount0 = ev.extra?.amount0 ? BigInt(ev.extra.amount0 as string) : undefined
+        const lpAmount1 = ev.extra?.amount1 ? BigInt(ev.extra.amount1 as string) : undefined
 
         return (
           <div key={i} className="flex-center gap4 flow-row" style={{ flexWrap: 'wrap' }}>
@@ -137,6 +183,7 @@ export function ProtocolEventList({ events }: { events: ProtocolEvent[] }) {
             </span>
             <span style={{ fontWeight: 600, color }}>{ev.action}</span>
 
+            {/* Single-token events (Aave, Morpho, etc.) */}
             {ev.amount !== undefined && token && (
               <span className="flow-amount" style={{ color }}>
                 {formatAmount(ev.amount, token.decimals, 4)} {token.symbol}
@@ -144,23 +191,49 @@ export function ProtocolEventList({ events }: { events: ProtocolEvent[] }) {
             )}
             {ev.amount !== undefined && !token && ev.token && (
               <span className="flow-amount" style={{ color }}>
-                {ev.amount.toString()}
-                {' '}
-                <HexTag value={ev.token} type="address" />
+                {ev.amount.toString()} <HexTag value={ev.token} type="address" />
               </span>
             )}
 
+            {/* Two-token events with ev.token2 (Balancer swap, Aave liquidation) */}
             {ev.token2 && (
               <>
-                <span className="muted">↔</span>
+                <span className="muted">{isSwap ? '→' : '↔'}</span>
                 {token2
-                  ? <span className="badge" style={{ background: `${token2.color}22`, color: token2.color }}>{token2.symbol}</span>
+                  ? <span className="flow-amount" style={{ color }}>
+                      {ev.amount2 !== undefined ? `${formatAmount(ev.amount2, token2.decimals, 4)} ` : ''}{token2.symbol}
+                    </span>
                   : <HexTag value={ev.token2} type="address" />
                 }
-                {ev.amount2 !== undefined && token2 && (
-                  <span className="flow-amount" style={{ color }}>
-                    {formatAmount(ev.amount2, token2.decimals, 4)} {token2.symbol}
-                  </span>
+              </>
+            )}
+
+            {/* Pool-based swap details (V2/V3 AMMs) */}
+            {isSwap && swapIn && swapOut && swapIn.tok && swapOut.tok && (
+              <>
+                <span className="flow-amount" style={{ color }}>
+                  {formatAmount(swapIn.amt, swapIn.tok.decimals, 4)} {swapIn.tok.symbol}
+                </span>
+                <span className="muted">→</span>
+                <span className="flow-amount" style={{ color }}>
+                  {formatAmount(swapOut.amt, swapOut.tok.decimals, 4)} {swapOut.tok.symbol}
+                </span>
+              </>
+            )}
+
+            {/* LP / CollectFees event details */}
+            {isLp && lpAmount0 !== undefined && lpAmount1 !== undefined && (lpAmount0 > 0n || lpAmount1 > 0n) && (
+              <>
+                {lpAmount0 > 0n && (
+                  tok0
+                    ? <span className="flow-amount" style={{ color }}>{formatAmount(lpAmount0, tok0.decimals, 4)} {tok0.symbol}</span>
+                    : <span className="flow-amount" style={{ color }}>{lpAmount0.toString()} {poolMeta && <HexTag value={poolMeta.token0} type="address" muted />}</span>
+                )}
+                {lpAmount0 > 0n && lpAmount1 > 0n && <span className="muted">+</span>}
+                {lpAmount1 > 0n && (
+                  tok1
+                    ? <span className="flow-amount" style={{ color }}>{formatAmount(lpAmount1, tok1.decimals, 4)} {tok1.symbol}</span>
+                    : <span className="flow-amount" style={{ color }}>{lpAmount1.toString()} {poolMeta && <HexTag value={poolMeta.token1} type="address" muted />}</span>
                 )}
               </>
             )}

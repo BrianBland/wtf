@@ -48,6 +48,14 @@ export function formatGas(gas: bigint): string {
   const n = Number(gas)
   if (n < 1_000) return n.toString()
   if (n < 1_000_000) return `${(n / 1_000).toFixed(1)}k`
+  if (n < 1_000_000_000) return `${(n / 1_000_000).toFixed(2)}M`
+  return `${(n / 1_000_000_000).toFixed(2)}G`
+}
+
+/** Compact count: 1234 → "1.2k", 1_500_000 → "1.5M" (no commas) */
+export function formatCount(n: number): string {
+  if (n < 1_000) return n.toString()
+  if (n < 1_000_000) return `${(n / 1_000).toFixed(1)}k`
   return `${(n / 1_000_000).toFixed(2)}M`
 }
 

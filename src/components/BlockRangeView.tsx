@@ -2,11 +2,11 @@ import { useMemo, useState, useRef } from 'react'
 import { useStore } from '../store'
 import { Block } from '../types'
 import { buildHistograms, AggMetric } from '../lib/aggregations'
-import { Histogram, SortKey } from './Histogram'
+import { Histogram, HistEntry, SortKey } from './Histogram'
 import { ProtocolDrillDown } from './ProtocolDrillDown'
 import { MetaSankeyView } from './MetaSankeyView'
 import { formatGas, formatGwei, formatNumber, formatTimestamp, gasColor } from '../lib/formatters'
-import { KNOWN_PROTOCOLS } from '../lib/protocols'
+import { KNOWN_PROTOCOLS, PROTOCOL_CLASSIFICATION } from '../lib/protocols'
 
 // ── Sparkline ─────────────────────────────────────────────────────────────
 
@@ -50,16 +50,12 @@ function sparkBarColor(
 }
 
 function Sparkline({ blocks, onSelect, metric }: { blocks: Block[]; onSelect: (n: number) => void; metric: AggMetric }) {
-  const liveFlashblocks = useStore((s) => s.liveFlashblocks)
   const chainElasticity = useStore((s) => s.chainElasticity)
   const target = 1 / chainElasticity
 
   const getValue = (b: Block) => metric === 'gas' ? Number(b.gasUsed) : b.transactions.length
 
-  const liveVal = liveFlashblocks
-    ? (metric === 'gas' ? Number(liveFlashblocks.totalGasUsed) : liveFlashblocks.totalTxCount)
-    : 0
-  const maxVal = Math.max(...blocks.map(getValue), liveVal, 1)
+  const maxVal = Math.max(...blocks.map(getValue), 1)
 
   const [hovered, setHovered] = useState<{ block: Block; x: number } | null>(null)
   const containerRef = useRef<HTMLDivElement>(null)
@@ -88,54 +84,6 @@ function Sparkline({ blocks, onSelect, metric }: { blocks: Block[]; onSelect: (n
           />
         )
       })}
-
-      {/* Live block being built via flashblock stream */}
-      {liveFlashblocks && (() => {
-        const lv = liveVal
-        const h  = Math.max(2, Math.round((lv / maxVal) * 32))
-        const gasLimit = Number(liveFlashblocks.gasLimit || 1n)
-        const chunks   = liveFlashblocks.chunks
-
-        // Per-chunk segments: height proportional to each chunk's contribution
-        let cumGas = 0n
-        const segments = chunks.map((chunk, i) => {
-          cumGas += chunk.gasUsed
-          const cumRatio = Number(cumGas) / gasLimit
-          const frac = metric === 'gas'
-            ? Number(chunk.gasUsed) / Math.max(Number(liveFlashblocks.totalGasUsed), 1)
-            : chunk.txCount / Math.max(liveFlashblocks.totalTxCount, 1)
-          return { frac, color: sparkBarColor(cumRatio, liveFlashblocks.blockNumber, target, chainElasticity, i) }
-        })
-
-        return (
-          <div
-            key="live"
-            className="spark-bar"
-            style={{
-              height: h,
-              display: 'flex',
-              flexDirection: 'column',
-              justifyContent: 'flex-end',
-              overflow: 'hidden',
-              opacity: 0.85,
-              outline: '1px solid var(--accent)',
-              outlineOffset: -1,
-            }}
-            title={`#${liveFlashblocks.blockNumber} building… (${chunks.length} flashblocks, ${Math.round(Number(liveFlashblocks.totalGasUsed) / 1e6)}M gas)`}
-          >
-            {segments.map(({ frac, color }, i) => (
-              <div
-                key={i}
-                style={{
-                  flex: `0 0 ${(frac * 100).toFixed(1)}%`,
-                  background: color,
-                  borderTop: i > 0 ? '1px solid rgba(0,0,0,0.15)' : undefined,
-                }}
-              />
-            ))}
-          </div>
-        )
-      })()}
 
       {hovered && (() => {
         const b = hovered.block
@@ -244,6 +192,52 @@ function SummaryStats({ blocks }: { blocks: Block[] }) {
       <div className="stat"><span className="stat-label">Avg Gas</span><span className="stat-value">{formatGas(BigInt(Math.round(avgGas)))}</span></div>
       {avgBase > 0 && <div className="stat"><span className="stat-label">Avg Base Fee</span><span className="stat-value">{formatGwei(BigInt(Math.round(avgBase)))}</span></div>}
     </div>
+  )
+}
+
+// ── Classified protocol histogram ─────────────────────────────────────────
+
+const PROTO_CLASS_ORDER = ['Concentrated Liquidity', 'Classic AMM', 'Lending', 'Other']
+
+function ClassifiedProtocolHistogram({ entries, sortBy }: { entries: HistEntry[]; sortBy: SortKey }) {
+  const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
+  const toggle = (cls: string) =>
+    setCollapsed((prev) => { const s = new Set(prev); s.has(cls) ? s.delete(cls) : s.add(cls); return s })
+
+  // Group entries by classification
+  const groups = new Map<string, HistEntry[]>()
+  for (const entry of entries) {
+    const cls = PROTOCOL_CLASSIFICATION[entry.key] ?? 'Other'
+    if (!groups.has(cls)) groups.set(cls, [])
+    groups.get(cls)!.push(entry)
+  }
+
+  return (
+    <>
+      {PROTO_CLASS_ORDER.filter((c) => groups.has(c)).map((cls) => {
+        const open = !collapsed.has(cls)
+        return (
+          <div key={cls}>
+            <div
+              style={{
+                display: 'flex', alignItems: 'center', gap: 4,
+                padding: '2px 12px', background: 'var(--surface3)',
+                cursor: 'pointer', userSelect: 'none',
+              }}
+              onClick={() => toggle(cls)}
+            >
+              <span style={{ fontSize: 9, color: 'var(--text3)' }}>{open ? '▼' : '▶'}</span>
+              <span style={{ fontSize: 9, fontWeight: 700, color: 'var(--text2)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+                {cls}
+              </span>
+            </div>
+            {open && (
+              <Histogram entries={groups.get(cls)!} type="other" maxRows={20} sortBy={sortBy} />
+            )}
+          </div>
+        )
+      })}
+    </>
   )
 }
 
@@ -393,7 +387,7 @@ export function BlockRangeView() {
                     <div className="panel-header" style={{ borderTop:'1px solid var(--border)', marginTop:4, fontSize:10 }}>
                       Protocols
                     </div>
-                    <Histogram entries={protocols} type="other" maxRows={8} sortBy={sortBy} />
+                    <ClassifiedProtocolHistogram entries={protocols} sortBy={sortBy} />
                   </>
                 )}
               </>

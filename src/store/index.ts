@@ -2,7 +2,6 @@ import { create } from 'zustand'
 import {
   Block, Transaction, Log, TokenFlow, ProtocolEvent,
   CallTrace, NavState, RawBlock, RawLog, RawReceipt,
-  FlashblockChunk, LiveFlashblockState,
 } from '../types'
 import {
   BlockStateProgress, PrestateResult, PrestateDiffResult, mergePrestate,
@@ -15,7 +14,7 @@ import {
   AAVE_REPAY_TOPIC, AAVE_LIQUIDATION_TOPIC,
   COMPOUND_MINT_TOPIC, COMPOUND_REDEEM_TOPIC,
   COMPOUND_BORROW_TOPIC, COMPOUND_REPAY_TOPIC,
-  AMM_BURN_TOPIC, UNI_V3_POOL_MINT_TOPIC,
+  AMM_BURN_TOPIC, UNI_V3_POOL_MINT_TOPIC, UNI_V3_POOL_BURN_TOPIC,
   UNI_V3_INCREASE_LIQ_TOPIC, UNI_V3_DECREASE_LIQ_TOPIC, UNI_V3_COLLECT_TOPIC,
   BALANCER_SWAP_TOPIC,
   MORPHO_SUPPLY_TOPIC, MORPHO_SUPPLY_COLLATERAL_TOPIC,
@@ -23,6 +22,7 @@ import {
   MORPHO_WITHDRAW_TOPIC, MORPHO_WITHDRAW_COLLATERAL_TOPIC, MORPHO_LIQUIDATE_TOPIC,
   EULER_DEPOSIT_TOPIC, EULER_WITHDRAW_TOPIC, EULER_BORROW_TOPIC, EULER_REPAY_TOPIC,
   COMPOUND3_SUPPLY_TOPIC, COMPOUND3_WITHDRAW_TOPIC, COMPOUND3_ABSORB_TOPIC,
+  AAVE_FLASH_LOAN_TOPIC, MORPHO_FLASH_LOAN_TOPIC, BALANCER_FLASH_LOAN_TOPIC,
   AERODROME_ADDRESSES, UNISWAP_V3_ADDRESSES,
   MORPHO_BLUE_ADDRESS, BALANCER_VAULT_ADDRESS,
   SEAMLESS_POOL_ADDRESS, AAVE_V3_POOL_ADDRESS, COMPOUND3_ADDRESSES,
@@ -32,8 +32,6 @@ import {
   topicToAddress, decodeUint256, decodeInt256,
 } from '../lib/formatters'
 import { RpcClient } from '../lib/rpc'
-import { makeFlashblockHandler } from '../lib/flashblockStream'
-import { detectFlashblocks, flashblockMapFromChunks } from '../lib/flashblocks'
 import { estimateElasticity } from '../lib/chainParams'
 
 const MAX_BLOCKS = 200
@@ -61,7 +59,11 @@ async function fetchV3PoolProtocols(
   for (const log of rawLogs) {
     const t0 = log.topics[0]?.toLowerCase()
     // Include both V3-style and V2-style swap/LP pools — factory lookup disambiguates both
-    if (t0 === UNI_V3_SWAP_TOPIC || t0 === UNI_V3_POOL_MINT_TOPIC || t0 === AMM_SWAP_TOPIC || t0 === AMM_BURN_TOPIC) {
+    if (t0 === UNI_V3_SWAP_TOPIC || t0 === UNI_V3_POOL_MINT_TOPIC || t0 === UNI_V3_POOL_BURN_TOPIC || t0 === AMM_SWAP_TOPIC || t0 === AMM_BURN_TOPIC) {
+      v3Pools.add(log.address.toLowerCase())
+    }
+    // V2 AMM AddLiquidity (COMPOUND_MINT_TOPIC with indexed sender = AMM pool, not cToken)
+    if (t0 === COMPOUND_MINT_TOPIC && log.topics.length >= 2) {
       v3Pools.add(log.address.toLowerCase())
     }
   }
@@ -104,11 +106,30 @@ function processLogs(
   poolProtocols: Map<string, string> = new Map(),
 ): { tokenFlows: TokenFlow[]; protocols: ProtocolEvent[] } {
   // Hint is used as fallback for pools not in poolProtocols (e.g. factory lookup failed/loading).
-  // 'aerodrome' hint → Aerodrome CL (V3-style concentrated liquidity pools)
-  // 'uniswap-v3' or null hint → Uniswap V3 (rough guess; poolCache will correct on re-render)
-  const clProtocol = hint === 'aerodrome' ? 'Aerodrome CL' : 'Uniswap V3'
+  // 'aerodrome' hint → Aerodrome CL / Aerodrome (AMM); 'uniswap-v3' → Uniswap V3; null → Unknown CL/AMM
+  const clProtocol  = hint === 'aerodrome' ? 'Aerodrome CL' : hint === 'uniswap-v3' ? 'Uniswap V3' : 'Unknown CL'
+  const ammProtocol = hint === 'aerodrome' ? 'Aerodrome' : 'Unknown AMM'
+  // Filter out 'Unknown' factory results — treat same as "not yet resolved" so hint fallback applies.
+  const poolProto = (addr: string): string | undefined => {
+    const p = poolProtocols.get(addr)
+    return (p && p !== 'Unknown') ? p : undefined
+  }
   const tokenFlows: TokenFlow[] = []
   const protocols: ProtocolEvent[] = []
+
+  // Pre-pass: collect V3 pool addresses from pool-level Mint/Burn events.
+  // NonfungiblePositionManager events (IncreaseLiquidity/DecreaseLiquidity/Collect) fire from
+  // the NftPM address — not the pool — so we look up the actual pool from adjacent pool events.
+  const v3MintPools: string[] = []
+  const v3BurnPools: string[] = []
+  for (const log of logs) {
+    const t0 = log.topics[0]?.toLowerCase()
+    if (t0 === UNI_V3_POOL_MINT_TOPIC) v3MintPools.push(log.address.toLowerCase())
+    if (t0 === UNI_V3_POOL_BURN_TOPIC) v3BurnPools.push(log.address.toLowerCase())
+  }
+  // Resolve protocol for NftPM events via associated pool-level events.
+  const resolveNftmProtocol = (poolAddrs: string[]): string =>
+    poolAddrs.map(a => poolProto(a)).find(p => p !== undefined) ?? clProtocol
 
   for (const log of logs) {
     const t0 = log.topics[0]?.toLowerCase()
@@ -126,7 +147,7 @@ function processLogs(
     // V3-style Swap — disambiguated by pool factory lookup; falls back to hint
     if (t0 === UNI_V3_SWAP_TOPIC) {
       protocols.push({
-        protocol: poolProtocols.get(log.address) ?? clProtocol, action: 'Swap',
+        protocol: poolProto(log.address) ?? clProtocol, action: 'Swap',
         extra: {
           pool:    log.address,
           amount0: decodeInt256(log.data, 0).toString(),
@@ -136,10 +157,17 @@ function processLogs(
     }
 
     // V2-style AMM Swap — factory lookup disambiguates (Aerodrome, PancakeSwap V2, SushiSwap V2, etc.)
+    // Swap(address indexed sender, uint256 amount0In, uint256 amount1In, uint256 amount0Out, uint256 amount1Out, address indexed to)
     if (t0 === AMM_SWAP_TOPIC) {
       protocols.push({
-        protocol: poolProtocols.get(log.address) ?? 'Aerodrome', action: 'Swap',
-        extra: { pool: log.address },
+        protocol: poolProto(log.address) ?? ammProtocol, action: 'Swap',
+        extra: {
+          pool:       log.address,
+          amount0In:  decodeUint256(log.data, 0).toString(),
+          amount1In:  decodeUint256(log.data, 1).toString(),
+          amount0Out: decodeUint256(log.data, 2).toString(),
+          amount1Out: decodeUint256(log.data, 3).toString(),
+        },
       })
     }
 
@@ -196,8 +224,34 @@ function processLogs(
     }
 
     // Balancer V2 — single vault, poolId is topics[1]
+    // Balancer V2 — Swap(bytes32 indexed poolId, address indexed tokenIn, address indexed tokenOut, uint256 amountIn, uint256 amountOut)
     if (t0 === BALANCER_SWAP_TOPIC && log.address === BALANCER_VAULT_ADDRESS) {
-      protocols.push({ protocol: 'Balancer V2', action: 'Swap' })
+      protocols.push({
+        protocol: 'Balancer V2', action: 'Swap',
+        token:   log.topics[2] ? topicToAddress(log.topics[2]) : undefined,
+        amount:  decodeUint256(log.data, 0),
+        token2:  log.topics[3] ? topicToAddress(log.topics[3]) : undefined,
+        amount2: decodeUint256(log.data, 1),
+      })
+    }
+
+    if (t0 === BALANCER_FLASH_LOAN_TOPIC && log.address === BALANCER_VAULT_ADDRESS) {
+      protocols.push({
+        protocol: 'Balancer V2', action: 'Flash Loan',
+        token:  log.topics[2] ? topicToAddress(log.topics[2]) : undefined,
+        amount: decodeUint256(log.data, 0),
+      })
+    }
+
+    // Aave V3 / Seamless flash loans
+    if (t0 === AAVE_FLASH_LOAN_TOPIC &&
+        (log.address === AAVE_V3_POOL_ADDRESS || log.address === SEAMLESS_POOL_ADDRESS)) {
+      const aaveProtocol = log.address === SEAMLESS_POOL_ADDRESS ? 'Seamless' : 'Aave V3'
+      protocols.push({
+        protocol: aaveProtocol, action: 'Flash Loan',
+        token:  log.topics[3] ? topicToAddress(log.topics[3]) : undefined,
+        amount: decodeUint256(log.data, 0),
+      })
     }
 
     // Morpho Blue — fixed address, all market events
@@ -216,6 +270,12 @@ function processLogs(
         protocols.push({ protocol: 'Morpho Blue', action: 'Withdraw', amount: decodeUint256(log.data, 0) })
       } else if (t0 === MORPHO_LIQUIDATE_TOPIC) {
         protocols.push({ protocol: 'Morpho Blue', action: 'Liquidation', amount: decodeUint256(log.data, 0) })
+      } else if (t0 === MORPHO_FLASH_LOAN_TOPIC) {
+        protocols.push({
+          protocol: 'Morpho Blue', action: 'Flash Loan',
+          token:  log.topics[2] ? topicToAddress(log.topics[2]) : undefined,
+          amount: decodeUint256(log.data, 0),
+        })
       }
     }
 
@@ -245,79 +305,115 @@ function processLogs(
       if (log.topics.length >= 2) {
         // V2-style AMM pool AddLiquidity — factory lookup disambiguates protocol
         protocols.push({
-          protocol: poolProtocols.get(log.address) ?? 'Aerodrome', action: 'AddLiquidity',
-          extra: { pool: log.address },
+          protocol: poolProto(log.address) ?? ammProtocol, action: 'AddLiquidity',
+          extra: {
+            pool: log.address,
+            amount0: decodeUint256(log.data, 0).toString(),
+            amount1: decodeUint256(log.data, 1).toString(),
+          },
         })
       } else {
-        // Moonwell/Compound cToken mint (deposit)
+        // Moonwell/Compound cToken Mint(address minter, uint256 mintAmount, uint256 mintTokens)
+        // All non-indexed: data[0]=minter, data[1]=mintAmount (underlying), data[2]=mintTokens (cToken)
         protocols.push({
           protocol: 'Moonwell', action: 'Supply',
-          extra: { mToken: log.address, amount: decodeUint256(log.data, 0).toString() },
+          token: log.address, amount: decodeUint256(log.data, 1),
         })
       }
     }
 
     // V2-style AMM LP Burn (RemoveLiquidity) — factory lookup disambiguates protocol
+    // Burn(address indexed sender, uint256 amount0, uint256 amount1, address indexed to)
     if (t0 === AMM_BURN_TOPIC) {
       protocols.push({
-        protocol: poolProtocols.get(log.address) ?? 'Aerodrome', action: 'RemoveLiquidity',
-        extra: { pool: log.address },
+        protocol: poolProto(log.address) ?? ammProtocol, action: 'RemoveLiquidity',
+        extra: {
+          pool: log.address,
+          amount0: decodeUint256(log.data, 0).toString(),
+          amount1: decodeUint256(log.data, 1).toString(),
+        },
       })
     }
 
     // V3-style pool Mint — disambiguated by pool factory lookup; falls back to hint
+    // Mint(address sender, address indexed owner, int24 indexed tickLower, int24 indexed tickUpper, uint128 amount, uint256 amount0, uint256 amount1)
     if (t0 === UNI_V3_POOL_MINT_TOPIC) {
       protocols.push({
-        protocol: poolProtocols.get(log.address) ?? clProtocol, action: 'AddLiquidity',
-        extra: { pool: log.address },
+        protocol: poolProto(log.address) ?? clProtocol, action: 'AddLiquidity',
+        extra: {
+          pool: log.address,
+          amount0: decodeUint256(log.data, 2).toString(),
+          amount1: decodeUint256(log.data, 3).toString(),
+        },
       })
     }
 
-    // NonfungiblePositionManager IncreaseLiquidity
+    // NonfungiblePositionManager IncreaseLiquidity — use pool-level Mint event for protocol/pool
+    // IncreaseLiquidity(uint256 indexed tokenId, uint128 liquidity, uint256 amount0, uint256 amount1)
     if (t0 === UNI_V3_INCREASE_LIQ_TOPIC) {
+      const poolAddr = v3MintPools[0] ?? log.address
       protocols.push({
-        protocol: clProtocol, action: 'AddLiquidity',
-        extra: { pool: log.address },
+        protocol: resolveNftmProtocol(v3MintPools), action: 'AddLiquidity',
+        extra: {
+          pool: poolAddr,
+          amount0: decodeUint256(log.data, 1).toString(),
+          amount1: decodeUint256(log.data, 2).toString(),
+        },
       })
     }
 
-    // NonfungiblePositionManager DecreaseLiquidity
+    // NonfungiblePositionManager DecreaseLiquidity — use pool-level Burn event for protocol/pool
+    // DecreaseLiquidity(uint256 indexed tokenId, uint128 liquidity, uint256 amount0, uint256 amount1)
     if (t0 === UNI_V3_DECREASE_LIQ_TOPIC) {
+      const poolAddr = v3BurnPools[0] ?? log.address
       protocols.push({
-        protocol: clProtocol, action: 'RemoveLiquidity',
-        extra: { pool: log.address },
+        protocol: resolveNftmProtocol(v3BurnPools), action: 'RemoveLiquidity',
+        extra: {
+          pool: poolAddr,
+          amount0: decodeUint256(log.data, 1).toString(),
+          amount1: decodeUint256(log.data, 2).toString(),
+        },
       })
     }
 
-    // NonfungiblePositionManager Collect fees
+    // NonfungiblePositionManager Collect(uint256 indexed tokenId, address recipient, uint256 amount0, uint256 amount1)
+    // topics[1]=tokenId, data[0]=recipient, data[1]=amount0Collected, data[2]=amount1Collected
     if (t0 === UNI_V3_COLLECT_TOPIC) {
+      const allPools = v3BurnPools.length > 0 ? v3BurnPools : v3MintPools
       protocols.push({
-        protocol: clProtocol, action: 'CollectFees',
-        extra: { pool: log.address },
+        protocol: resolveNftmProtocol(allPools), action: 'CollectFees',
+        extra: {
+          pool: allPools[0] ?? log.address,
+          amount0: decodeUint256(log.data, 1).toString(),
+          amount1: decodeUint256(log.data, 2).toString(),
+        },
       })
     }
 
-    // Moonwell/Compound Redeem
+    // Moonwell/Compound Redeem(address redeemer, uint256 redeemAmount, uint256 redeemTokens)
+    // All non-indexed: data[0]=redeemer, data[1]=redeemAmount (underlying), data[2]=redeemTokens (cToken)
     if (t0 === COMPOUND_REDEEM_TOPIC) {
       protocols.push({
         protocol: 'Moonwell', action: 'Withdraw',
-        extra: { mToken: log.address },
+        token: log.address, amount: decodeUint256(log.data, 1),
       })
     }
 
-    // Moonwell/Compound Borrow
+    // Moonwell/Compound Borrow(address borrower, uint256 borrowAmount, uint256 accountBorrows, uint256 totalBorrows)
+    // All non-indexed: data[0]=borrower, data[1]=borrowAmount (underlying)
     if (t0 === COMPOUND_BORROW_TOPIC) {
       protocols.push({
         protocol: 'Moonwell', action: 'Borrow',
-        extra: { mToken: log.address, amount: decodeUint256(log.data, 0).toString() },
+        token: log.address, amount: decodeUint256(log.data, 1),
       })
     }
 
-    // Moonwell/Compound Repay
+    // Moonwell/Compound RepayBorrow(address payer, address borrower, uint256 repayAmount, ...)
+    // All non-indexed: data[0]=payer, data[1]=borrower, data[2]=repayAmount (underlying)
     if (t0 === COMPOUND_REPAY_TOPIC) {
       protocols.push({
         protocol: 'Moonwell', action: 'Repay',
-        extra: { mToken: log.address },
+        token: log.address, amount: decodeUint256(log.data, 2),
       })
     }
   }
@@ -465,18 +561,22 @@ interface Store {
   // Chain parameters (fetched at startup via eth_chainId)
   chainElasticity: number  // EIP-1559 elasticity multiplier (typically 2 or 6)
 
-  // Flashblock streaming
-  liveFlashblocks:   LiveFlashblockState | null
-  flashblockHistory: Map<number, FlashblockChunk[]>  // blockNumber → per-chunk data
+}
 
-  // Resolve flashblock assignments: uses stream data when available, falls back to detection
-  resolveFlashblocks: (blockNumber: number, txs: Transaction[], baseFee: bigint) => Map<string, number>
+const RPC_STORAGE_KEY = 'wtf_rpc_url'
+const DEFAULT_RPC_URL = 'wss://base.drpc.org'
+
+function loadSavedRpcUrl(): string {
+  try { return localStorage.getItem(RPC_STORAGE_KEY) || DEFAULT_RPC_URL } catch { return DEFAULT_RPC_URL }
 }
 
 export type { Store }
 export const useStore = create<Store>((set, get) => ({
-  rpcUrl: 'wss://base.drpc.org',
-  setRpcUrl: (url) => set({ rpcUrl: url }),
+  rpcUrl: loadSavedRpcUrl(),
+  setRpcUrl: (url) => {
+    try { localStorage.setItem(RPC_STORAGE_KEY, url) } catch { /* ignore */ }
+    set({ rpcUrl: url })
+  },
 
   ethPriceUSD: 2500,
   btcPriceUSD: 100_000,
@@ -490,8 +590,6 @@ export const useStore = create<Store>((set, get) => ({
 
   client: null, connected: false, connecting: false, connError: null,
   chainElasticity: 6,
-  liveFlashblocks: null,
-  flashblockHistory: new Map(),
 
   connect: async () => {
     const { rpcUrl } = get()
@@ -587,18 +685,6 @@ export const useStore = create<Store>((set, get) => ({
       await client.subscribe<{ number: string; hash: string }>(
         'newHeads', null, async (header) => {
           try {
-            // Seal live flashblock state into history if it matches this block
-            const live = get().liveFlashblocks
-            const headN = hexToNumber(header.number)
-            if (live?.blockNumber === headN) {
-              set((s) => {
-                const h = new Map(s.flashblockHistory)
-                h.set(live.blockNumber, live.chunks)
-                if (h.size > MAX_BLOCKS) h.delete(Math.min(...h.keys()))
-                return { flashblockHistory: h, liveFlashblocks: null }
-              })
-            }
-
             const hexN = header.number
             const [raw, rawLogs, rawReceipts] = await Promise.all([
               client.call<RawBlock>('eth_getBlockByNumber', [hexN, true]),
@@ -628,17 +714,11 @@ export const useStore = create<Store>((set, get) => ({
       set({ connError: `Subscription failed: ${(e as Error).message}` })
     }
 
-    // Phase 4: Subscribe to flashblocks (non-critical — endpoint may not support it)
-    try {
-      await client.subscribe('newFlashblocks', null, makeFlashblockHandler(
-        (state) => set({ liveFlashblocks: state }),
-      ))
-    } catch { /* silently skip if unsupported */ }
   },
 
   disconnect: () => {
     get().client?.close()
-    set({ client: null, connected: false, blocks: new Map(), latestBlock: null, initialized: false, liveFlashblocks: null })
+    set({ client: null, connected: false, blocks: new Map(), latestBlock: null, initialized: false })
   },
 
   blocks: new Map(), latestBlock: null, initialized: false, blockLoading: new Set(),
@@ -677,8 +757,17 @@ export const useStore = create<Store>((set, get) => ({
       const blocks = new Map(s.blocks)
       blocks.set(block.number, block)
       if (blocks.size > MAX_BLOCKS) {
-        const oldest = Math.min(...blocks.keys())
-        blocks.delete(oldest)
+        // Never evict the currently-viewed block so the user doesn't see "block not found"
+        const pinnedBlock = s.nav.view === 'block' ? s.nav.blockNumber
+                          : s.nav.view === 'tx'    ? s.nav.blockNumber
+                          : undefined
+        const sorted = [...blocks.keys()].sort((a, b) => a - b)
+        for (const key of sorted) {
+          if (key !== pinnedBlock) {
+            blocks.delete(key)
+            break
+          }
+        }
       }
       return { blocks }
     }),
@@ -786,12 +875,6 @@ export const useStore = create<Store>((set, get) => ({
   getPool: (address) => {
     const entry = get().poolCache.get(address)
     return typeof entry === 'object' ? entry : undefined
-  },
-
-  resolveFlashblocks: (blockNumber, txs, baseFee) => {
-    const chunks = get().flashblockHistory.get(blockNumber)
-    if (chunks) return flashblockMapFromChunks(txs, chunks)
-    return detectFlashblocks(txs, baseFee)
   },
 
   blockStateCache: new Map(),

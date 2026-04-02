@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { hexColors } from '../lib/colorize'
 import { KNOWN_TOKENS, KNOWN_PROTOCOLS, KNOWN_SELECTORS, PROTOCOL_COLORS } from '../lib/protocols'
-import { shortAddr, formatPercent, formatNumber, formatGas } from '../lib/formatters'
+import { shortAddr, formatPercent, formatCount, formatGas } from '../lib/formatters'
 import { AggMetric } from '../lib/aggregations'
 
 export interface HistEntry {
@@ -109,16 +109,15 @@ export function Histogram({ entries, type = 'address', maxRows = 8, onSelect, se
             <div className="hist-bar-wrap">
               <div className="hist-bar" style={{ width: `${pct * 100}%`, background: bg }} />
             </div>
-            <span className="hist-count" style={{ gap: 3, display: 'flex', alignItems: 'center' }}>
-              <span style={{ color: sortBy === 'txs' ? 'var(--text)' : 'var(--text3)', fontVariantNumeric: 'tabular-nums' }}
-                title="Transaction count">
-                {formatNumber(count)}
-              </span>
-              <span style={{ color: 'var(--border)', fontSize: 9 }}>·</span>
-              <span style={{ color: sortBy === 'gas' ? 'var(--text)' : 'var(--text3)', fontVariantNumeric: 'tabular-nums' }}
-                title="Gas limit (sum of tx.gasLimit — approximates usage)">
-                {formatGas(BigInt(Math.round(gas * 1000)))}
-              </span>
+            <span className="hist-count"
+              style={{ color: sortBy === 'txs' ? 'var(--text)' : 'var(--text3)' }}
+              title="Transaction count">
+              {formatCount(count)}
+            </span>
+            <span className="hist-gas"
+              style={{ color: sortBy === 'gas' ? 'var(--text)' : 'var(--text3)' }}
+              title="Gas (sum of gasUsed when available, else gasLimit)">
+              {formatGas(BigInt(Math.round(gas * 1000)))}
             </span>
             <span className="hist-pct">{formatPercent(val, total)}</span>
           </div>

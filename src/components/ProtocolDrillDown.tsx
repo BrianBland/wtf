@@ -1,10 +1,10 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Block } from '../types'
+import { Block, Transaction } from '../types'
 import { buildPoolActivity, groupByProtocol, PoolSummary } from '../lib/poolActivity'
 import { useStore, Store } from '../store'
 import { shortAddr, formatAmount, formatEth } from '../lib/formatters'
 import { hexColors } from '../lib/colorize'
-import { KNOWN_TOKENS, KNOWN_PROTOCOLS, PROTOCOL_COLORS } from '../lib/protocols'
+import { KNOWN_TOKENS, KNOWN_PROTOCOLS, PROTOCOL_COLORS, PROTOCOL_CLASSIFICATION } from '../lib/protocols'
 import { PoolMeta } from '../lib/poolFetch'
 import { PoolFlowView } from './PoolFlowView'
 
@@ -28,12 +28,61 @@ function PairLabel({ meta, tokenCache }: { meta: PoolMeta; tokenCache: Store['to
   )
 }
 
+// ── Inline tx action summary ──────────────────────────────────────────────
+
+function txActionSummary(
+  tx: Transaction,
+  poolAddr: string,
+  tokenCacheRef: Store['tokenCache'],
+): string | null {
+  // Net token flows into/out-of the pool
+  const net = new Map<string, bigint>()
+  for (const flow of tx.tokenFlows) {
+    if (flow.to   === poolAddr) net.set(flow.token, (net.get(flow.token) ?? 0n) + flow.amount)
+    if (flow.from === poolAddr) net.set(flow.token, (net.get(flow.token) ?? 0n) - flow.amount)
+  }
+  if (net.size === 0) return null
+
+  const ins  = [...net.entries()].filter(([, v]) => v > 0n)   // into pool (user sells)
+  const outs = [...net.entries()].filter(([, v]) => v < 0n)   // out of pool (user receives)
+
+  const fmt = (addr: string, amt: bigint) => {
+    const sym  = tokenSymbol(addr, tokenCacheRef)
+    const info = KNOWN_TOKENS[addr]
+    const dec  = info?.decimals ?? 18
+    const pos  = amt < 0n ? -amt : amt
+    return `${formatAmount(pos, dec, 3)} ${sym}`
+  }
+
+  // Determine action from tx.protocols (best-effort)
+  const actionEv = tx.protocols.find((e) =>
+    e.action === 'Swap' || e.action === 'AddLiquidity' || e.action === 'RemoveLiquidity'
+  )
+  const action = actionEv?.action ?? (ins.length > 0 && outs.length > 0 ? 'Swap' : null)
+
+  if (action === 'Swap' && ins.length === 1 && outs.length === 1) {
+    return `Swap ${fmt(ins[0][0], ins[0][1])} → ${fmt(outs[0][0], outs[0][1])}`
+  }
+  if (action === 'AddLiquidity') {
+    return `Add ${ins.map(([a, v]) => fmt(a, v)).join(' + ')}`
+  }
+  if (action === 'RemoveLiquidity') {
+    return `Remove ${outs.map(([a, v]) => fmt(a, v)).join(' + ')}`
+  }
+  // Fallback for multi-leg or unknown
+  const inStr  = ins.map(([a, v])  => fmt(a, v)).join(' + ')
+  const outStr = outs.map(([a, v]) => fmt(a, v)).join(' + ')
+  if (inStr && outStr) return `${inStr} → ${outStr}`
+  return null
+}
+
 // ── Pool row ──────────────────────────────────────────────────────────────
 
 function PoolRow({
   pool,
   poolMeta,
   tokenCache,
+  txMap,
   blocks,
   onSelectTx,
   expanded,
@@ -42,6 +91,7 @@ function PoolRow({
   pool: PoolSummary
   poolMeta?: PoolMeta
   tokenCache: Store['tokenCache']
+  txMap: Map<string, Transaction>
   blocks: Block[]
   onSelectTx: (hash: string) => void
   expanded: boolean
@@ -122,20 +172,29 @@ function PoolRow({
             <PoolFlowView blocks={blocks} poolAddr={pool.pool} meta={poolMeta} />
           )}
 
-          {/* Tx hash list */}
+          {/* Tx hash list with inline action summaries */}
           <div style={{ padding: '2px 0 4px 0' }}>
-            {pool.txHashes.map((hash) => (
-              <div
-                key={hash}
-                className="data-row"
-                style={{ paddingLeft: 36, cursor:'pointer', gap:6 }}
-                onClick={() => onSelectTx(hash)}
-              >
-                <span style={{ fontSize:9, color:'var(--accent)', fontFamily:'monospace' }}>
-                  {hash.slice(0, 10)}…{hash.slice(-6)}
-                </span>
-              </div>
-            ))}
+            {pool.txHashes.map((hash) => {
+              const tx = txMap.get(hash)
+              const summary = tx ? txActionSummary(tx, pool.pool, tokenCache) : null
+              return (
+                <div
+                  key={hash}
+                  className="data-row"
+                  style={{ paddingLeft: 36, cursor:'pointer', gap:8 }}
+                  onClick={() => onSelectTx(hash)}
+                >
+                  <span style={{ fontSize:9, color:'var(--accent)', fontFamily:'monospace', flexShrink:0 }}>
+                    {hash.slice(0, 10)}…{hash.slice(-6)}
+                  </span>
+                  {summary && (
+                    <span style={{ fontSize:9, color:'var(--text2)', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
+                      {summary}
+                    </span>
+                  )}
+                </div>
+              )
+            })}
           </div>
         </div>
       )}
@@ -162,6 +221,12 @@ function ProtocolSection({
 }) {
   const [open, setOpen]         = useState(true)
   const [expandedPool, setExpandedPool] = useState<string | null>(null)
+
+  const txMap = useMemo(() => {
+    const m = new Map<string, Transaction>()
+    for (const block of blocks) for (const tx of block.transactions) m.set(tx.hash, tx)
+    return m
+  }, [blocks])
 
   const sorted = [...pools].sort((a, b) =>
     (b.swaps + b.lpAdds + b.lpRemoves) - (a.swaps + a.lpAdds + a.lpRemoves)
@@ -198,6 +263,7 @@ function ProtocolSection({
             pool={pool}
             poolMeta={poolMeta}
             tokenCache={tokenCache}
+            txMap={txMap}
             blocks={blocks}
             onSelectTx={onSelectTx}
             expanded={expandedPool === pool.pool}
@@ -205,6 +271,62 @@ function ProtocolSection({
           />
         )
       })}
+    </div>
+  )
+}
+
+// ── Classification group ──────────────────────────────────────────────────
+
+const CLASS_ORDER = ['Concentrated Liquidity', 'Classic AMM', 'Lending', 'Other']
+
+function ClassificationGroup({
+  label,
+  entries,
+  blocks,
+  poolCache,
+  tokenCache,
+  onSelectTx,
+}: {
+  label: string
+  entries: [string, PoolSummary[]][]
+  blocks: Block[]
+  poolCache: Store['poolCache']
+  tokenCache: Store['tokenCache']
+  onSelectTx: (hash: string) => void
+}) {
+  const [open, setOpen] = useState(true)
+  const totalPools = entries.reduce((s, [, p]) => s + p.length, 0)
+  const totalSwaps = entries.reduce((s, [, p]) => s + p.reduce((ss, pp) => ss + pp.swaps, 0), 0)
+  const totalLp    = entries.reduce((s, [, p]) => s + p.reduce((ss, pp) => ss + pp.lpAdds + pp.lpRemoves, 0), 0)
+
+  return (
+    <div>
+      <div
+        className="panel-header"
+        style={{ cursor: 'pointer', background: 'var(--surface3)', userSelect: 'none' }}
+        onClick={() => setOpen((o) => !o)}
+      >
+        <span style={{ fontSize: 9, color: 'var(--text3)', marginRight: 4 }}>{open ? '▼' : '▶'}</span>
+        <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--text2)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+          {label}
+        </span>
+        <span className="count">
+          {totalPools} pool{totalPools !== 1 ? 's' : ''}
+          {totalSwaps > 0 && ` · ${totalSwaps} swap${totalSwaps !== 1 ? 's' : ''}`}
+          {totalLp > 0    && ` · ${totalLp} LP`}
+        </span>
+      </div>
+      {open && entries.map(([protocol, pools]) => (
+        <ProtocolSection
+          key={protocol}
+          protocol={protocol}
+          pools={pools}
+          blocks={blocks}
+          poolCache={poolCache}
+          tokenCache={tokenCache}
+          onSelectTx={onSelectTx}
+        />
+      ))}
     </div>
   )
 }
@@ -240,11 +362,12 @@ export function ProtocolDrillDown({
   const groups = useMemo(() => {
     const resolve = (addr: string): string | undefined => {
       const m = poolCache.get(addr)
-      // Return factory-resolved protocol when known, including 'Unknown'.
-      // Returning 'Unknown' (instead of undefined) prevents falling back to
-      // the eventProtocols which may contain stale 'Uniswap V3' guesses.
-      if (typeof m === 'object') return m.protocol
-      return undefined  // still loading or error — fall back to eventProtocols
+      // Only trust factory-resolved protocol when it's a recognized protocol.
+      // Returning undefined for 'Unknown' lets groupByProtocol fall back to the
+      // event-derived protocol, which correctly classifies CL vs Classic AMM pools
+      // with unrecognized factories.
+      if (typeof m === 'object' && m.protocol !== 'Unknown') return m.protocol
+      return undefined  // still loading, error, or unknown factory — fall back to eventProtocols
     }
     return groupByProtocol(flatPools, resolve)
   }, [flatPools, poolCache])
@@ -259,13 +382,24 @@ export function ProtocolDrillDown({
     return sum(b[1]) - sum(a[1])
   })
 
+  // Group by classification
+  const byClass = new Map<string, [string, PoolSummary[]][]>()
+  for (const entry of sortedGroups) {
+    const cls = PROTOCOL_CLASSIFICATION[entry[0]] ?? 'Other'
+    if (!byClass.has(cls)) byClass.set(cls, [])
+    byClass.get(cls)!.push(entry)
+  }
+  const classEntries = CLASS_ORDER
+    .filter((c) => byClass.has(c))
+    .map((c) => [c, byClass.get(c)!] as const)
+
   return (
     <div>
-      {sortedGroups.map(([protocol, pools]) => (
-        <ProtocolSection
-          key={protocol}
-          protocol={protocol}
-          pools={pools}
+      {classEntries.map(([cls, entries]) => (
+        <ClassificationGroup
+          key={cls}
+          label={cls}
+          entries={entries}
           blocks={blocks}
           poolCache={poolCache}
           tokenCache={tokenCache}

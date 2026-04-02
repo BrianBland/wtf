@@ -252,6 +252,13 @@ const ABI_MAP: Record<string, AbiFn> = {
 
 // ── ABI encoding helpers ───────────────────────────────────────────────────
 
+function hexToBytes(hex: string): Uint8Array {
+  const h = hex.startsWith('0x') ? hex.slice(2) : hex
+  const out = new Uint8Array(Math.ceil(h.length / 2))
+  for (let i = 0; i < out.length; i++) out[i] = parseInt(h.slice(i * 2, i * 2 + 2), 16)
+  return out
+}
+
 function readSlot(data: Uint8Array, byteOffset: number): bigint {
   let v = 0n
   for (let i = 0; i < 32; i++) {
@@ -404,17 +411,65 @@ function decodeValue(
 
 // ── Public API ─────────────────────────────────────────────────────────────
 
+/** Recursively parse a text-signature params string into AbiInput[].
+ *  Tuples are written as (type1,type2,...) in canonical ABI text form. */
+function parseSigToInputs(paramsStr: string): AbiInput[] {
+  if (!paramsStr) return []
+  return splitTopLevel(paramsStr).map((t, i) => {
+    const trimmed = t.trim()
+    if (trimmed.startsWith('(')) {
+      const closeIdx = trimmed.lastIndexOf(')')
+      const inner    = trimmed.slice(1, closeIdx)
+      const suffix   = trimmed.slice(closeIdx + 1)   // e.g. '' | '[]' | '[5]'
+      return { name: `field${i}`, type: suffix ? `tuple${suffix}` : 'tuple', components: parseSigToInputs(inner) }
+    }
+    return { name: `arg${i}`, type: trimmed }
+  })
+}
+
+/** Decode calldata using a full text signature from Sourcify/4byte.
+ *  Param names default to arg0, arg1, … since the text sig has no names. */
+export function decodeCalldataFromSig(input: string, sig: string): DecodedCall | null {
+  const m = sig.match(/^([A-Za-z0-9_$]+)\((.*)\)$/)
+  if (!m || !input || input.length < 10) return null
+  const [, name, paramsStr] = m
+  try {
+    const inputs = parseSigToInputs(paramsStr)
+    const data   = hexToBytes(input).slice(4)
+
+    // Reject if calldata is shorter than the ABI head requires
+    const totalHead = inputs.reduce((sum, inp) => sum + headSize(inp.type, inp.components), 0)
+    if (data.length < totalHead) return null
+
+    // Reject if any dynamic offset pointer is out of range.
+    // Valid offsets must point past the head area (>= totalHead) and within data.
+    let headOff = 0
+    for (const inp of inputs) {
+      if (isDynamic(inp.type, inp.components)) {
+        const offset = Number(readSlot(data, headOff))
+        if (offset < totalHead || offset > data.length) return null
+      }
+      headOff += headSize(inp.type, inp.components)
+    }
+
+    const params: DecodedParam[] = []
+    let headOffset = 0
+    for (const inp of inputs) {
+      params.push({ name: inp.name, type: inp.type, value: decodeValue(data, inp.type, inp.components, headOffset, 0) })
+      headOffset += headSize(inp.type, inp.components)
+    }
+    return { selector: input.slice(0, 10).toLowerCase(), name, params }
+  } catch {
+    return null
+  }
+}
+
 export function decodeCalldata(input: string, selector: string): DecodedCall | null {
   const abi = ABI_MAP[selector.toLowerCase()]
   if (!abi || !input || input.length < 10) return null
 
   try {
-    const hex = input.startsWith('0x') ? input.slice(2) : input
-    const rawBytes = new Uint8Array(hex.length / 2)
-    for (let i = 0; i < rawBytes.length; i++) {
-      rawBytes[i] = parseInt(hex.slice(i * 2, i * 2 + 2), 16)
-    }
-    const data = rawBytes.slice(4)  // skip 4-byte selector
+    const data = hexToBytes(input).slice(4)  // skip 4-byte selector
 
     const params: DecodedParam[] = []
     let headOffset = 0
@@ -432,3 +487,387 @@ export function decodeCalldata(input: string, selector: string): DecodedCall | n
 }
 
 export { ABI_MAP }
+
+// ── Event types ────────────────────────────────────────────────────────────
+
+export interface AbiEventInput extends AbiInput {
+  indexed: boolean
+}
+
+export interface AbiEvent {
+  name: string
+  inputs: AbiEventInput[]
+}
+
+export interface DecodedLog {
+  name: string
+  params: Array<{ name: string; type: string; indexed: boolean; value: DecodedValue }>
+}
+
+// ── Known event ABIs (keyed by topic0 hash) ────────────────────────────────
+
+export const EVENT_ABI_MAP: Record<string, AbiEvent> = {
+  // ERC20
+  '0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef': { name: 'Transfer', inputs: [
+    { name: 'from',  type: 'address', indexed: true  },
+    { name: 'to',    type: 'address', indexed: true  },
+    { name: 'value', type: 'uint256', indexed: false },
+  ]},
+  '0x8c5be1e5ebec7d5bd14f71427d1e84f3dd0314c0f7b2291e5b200ac8c7c3b925': { name: 'Approval', inputs: [
+    { name: 'owner',   type: 'address', indexed: true  },
+    { name: 'spender', type: 'address', indexed: true  },
+    { name: 'value',   type: 'uint256', indexed: false },
+  ]},
+  // Uniswap V3 pool Swap
+  '0xc42079f94a6350d7e6235f29174924f928cc2ac818eb64fed8004e115fbcca67': { name: 'Swap', inputs: [
+    { name: 'sender',       type: 'address', indexed: true  },
+    { name: 'recipient',    type: 'address', indexed: true  },
+    { name: 'amount0',      type: 'int256',  indexed: false },
+    { name: 'amount1',      type: 'int256',  indexed: false },
+    { name: 'sqrtPriceX96', type: 'uint160', indexed: false },
+    { name: 'liquidity',    type: 'uint128', indexed: false },
+    { name: 'tick',         type: 'int24',   indexed: false },
+  ]},
+  // AMM (Uniswap V2 / Aerodrome classic) Swap
+  '0xd78ad95fa46c994b6551d0da85fc275fe613ce37657fb8d5e3d130840159d822': { name: 'Swap', inputs: [
+    { name: 'sender',     type: 'address', indexed: true  },
+    { name: 'amount0In',  type: 'uint256', indexed: false },
+    { name: 'amount1In',  type: 'uint256', indexed: false },
+    { name: 'amount0Out', type: 'uint256', indexed: false },
+    { name: 'amount1Out', type: 'uint256', indexed: false },
+    { name: 'to',         type: 'address', indexed: true  },
+  ]},
+  // AMM Burn
+  '0xdccd412f0b1252819cb1fd330b93224ca42612892bb3f4cf2e500068de590b6f': { name: 'Burn', inputs: [
+    { name: 'sender',  type: 'address', indexed: true  },
+    { name: 'amount0', type: 'uint256', indexed: false },
+    { name: 'amount1', type: 'uint256', indexed: false },
+    { name: 'to',      type: 'address', indexed: true  },
+  ]},
+  // Uniswap V3 / CL pool Mint
+  '0x7a53080ba414158be7ec69b987b5fb7d07dee101fe85488f0853ae16239d0bde': { name: 'Mint', inputs: [
+    { name: 'sender',    type: 'address', indexed: false },
+    { name: 'owner',     type: 'address', indexed: true  },
+    { name: 'tickLower', type: 'int24',   indexed: true  },
+    { name: 'tickUpper', type: 'int24',   indexed: true  },
+    { name: 'amount',    type: 'uint128', indexed: false },
+    { name: 'amount0',   type: 'uint256', indexed: false },
+    { name: 'amount1',   type: 'uint256', indexed: false },
+  ]},
+  // Uniswap V3 / CL pool Burn
+  '0x0c396cd989a39f4459b5fa1aed6a9a8dcdbc45908acfd67e028cd568da98982c': { name: 'Burn', inputs: [
+    { name: 'owner',     type: 'address', indexed: true  },
+    { name: 'tickLower', type: 'int24',   indexed: true  },
+    { name: 'tickUpper', type: 'int24',   indexed: true  },
+    { name: 'amount',    type: 'uint128', indexed: false },
+    { name: 'amount0',   type: 'uint256', indexed: false },
+    { name: 'amount1',   type: 'uint256', indexed: false },
+  ]},
+  // Uniswap V3 NonfungiblePositionManager
+  '0x3067048beee31b25b2f1681f88dac838c8bba36af25bfb2b7cf7473a5847e35c': { name: 'IncreaseLiquidity', inputs: [
+    { name: 'tokenId',   type: 'uint256', indexed: true  },
+    { name: 'liquidity', type: 'uint128', indexed: false },
+    { name: 'amount0',   type: 'uint256', indexed: false },
+    { name: 'amount1',   type: 'uint256', indexed: false },
+  ]},
+  '0x26f6a048ee9138f2c0ce266f322cb99228e8d619ae2bff30c67f8dcf9d2377b4': { name: 'DecreaseLiquidity', inputs: [
+    { name: 'tokenId',   type: 'uint256', indexed: true  },
+    { name: 'liquidity', type: 'uint128', indexed: false },
+    { name: 'amount0',   type: 'uint256', indexed: false },
+    { name: 'amount1',   type: 'uint256', indexed: false },
+  ]},
+  '0x40d0efd1a53d60ecbf40971b9daf7dc90178c3eff3b3f722c8d5fdd96b56f8c9': { name: 'Collect', inputs: [
+    { name: 'tokenId',          type: 'uint256', indexed: true  },
+    { name: 'recipient',        type: 'address', indexed: false },
+    { name: 'amount0Collected', type: 'uint256', indexed: false },
+    { name: 'amount1Collected', type: 'uint256', indexed: false },
+  ]},
+  // Balancer V2 Swap
+  '0x2170c741c41531aec20e7c107c24eecfdd15e69c9bb0a8dd37b1840b9e0b207b': { name: 'Swap', inputs: [
+    { name: 'poolId',    type: 'bytes32', indexed: true  },
+    { name: 'tokenIn',   type: 'address', indexed: true  },
+    { name: 'tokenOut',  type: 'address', indexed: true  },
+    { name: 'amountIn',  type: 'uint256', indexed: false },
+    { name: 'amountOut', type: 'uint256', indexed: false },
+  ]},
+  // Aave V3
+  '0x2b627736bca15cd5381dcf80b0bf11fd197d01a037c52b927a881a10fb73ba61': { name: 'Supply', inputs: [
+    { name: 'reserve',      type: 'address', indexed: true  },
+    { name: 'user',         type: 'address', indexed: false },
+    { name: 'onBehalfOf',   type: 'address', indexed: true  },
+    { name: 'amount',       type: 'uint256', indexed: false },
+    { name: 'referralCode', type: 'uint16',  indexed: true  },
+  ]},
+  '0x3115d1449a7b732c986cba18244e897a450f61e1bb8d589cd2e69e6c8924f9f7': { name: 'Withdraw', inputs: [
+    { name: 'reserve', type: 'address', indexed: true  },
+    { name: 'user',    type: 'address', indexed: true  },
+    { name: 'to',      type: 'address', indexed: true  },
+    { name: 'amount',  type: 'uint256', indexed: false },
+  ]},
+  '0xc6a898309e823ee50bac64e45ca8adba6690e99e7841c45d754785487320f9ce': { name: 'Borrow', inputs: [
+    { name: 'reserve',          type: 'address', indexed: true  },
+    { name: 'user',             type: 'address', indexed: false },
+    { name: 'onBehalfOf',       type: 'address', indexed: true  },
+    { name: 'amount',           type: 'uint256', indexed: false },
+    { name: 'interestRateMode', type: 'uint8',   indexed: false },
+    { name: 'borrowRate',       type: 'uint128', indexed: false },
+    { name: 'referralCode',     type: 'uint16',  indexed: true  },
+  ]},
+  '0xa534c8dbe71f871f9f3530e97a74601fea17b426cae02e1c5aee42c96c784051': { name: 'Repay', inputs: [
+    { name: 'reserve',    type: 'address', indexed: true  },
+    { name: 'user',       type: 'address', indexed: true  },
+    { name: 'repayer',    type: 'address', indexed: true  },
+    { name: 'amount',     type: 'uint256', indexed: false },
+    { name: 'useATokens', type: 'bool',    indexed: false },
+  ]},
+  '0xe413a321e8681d831f4dbccbeca18f7eab7cf8d0a5c8ead7f3ba01b35d4b9e7': { name: 'LiquidationCall', inputs: [
+    { name: 'collateralAsset',       type: 'address', indexed: true  },
+    { name: 'debtAsset',             type: 'address', indexed: true  },
+    { name: 'user',                  type: 'address', indexed: true  },
+    { name: 'debtToCover',           type: 'uint256', indexed: false },
+    { name: 'liquidatedCollateral',  type: 'uint256', indexed: false },
+    { name: 'liquidator',            type: 'address', indexed: false },
+    { name: 'receiveAToken',         type: 'bool',    indexed: false },
+  ]},
+  '0x631042c832b07452973831137f2d73e395028b44b250dedc5abb0ee766e168ac': { name: 'FlashLoan', inputs: [
+    { name: 'target',           type: 'address', indexed: true  },
+    { name: 'initiator',        type: 'address', indexed: true  },
+    { name: 'asset',            type: 'address', indexed: true  },
+    { name: 'amount',           type: 'uint256', indexed: false },
+    { name: 'interestRateMode', type: 'uint8',   indexed: false },
+    { name: 'premium',          type: 'uint256', indexed: false },
+    { name: 'referralCode',     type: 'uint16',  indexed: false },
+  ]},
+  // Morpho Blue
+  '0xedf8870433c83823eb071d3df1caa8d008f12f6440918c20d75a3602cda30fe0': { name: 'Supply', inputs: [
+    { name: 'id',       type: 'bytes32', indexed: true  },
+    { name: 'caller',   type: 'address', indexed: true  },
+    { name: 'onBehalf', type: 'address', indexed: true  },
+    { name: 'assets',   type: 'uint256', indexed: false },
+    { name: 'shares',   type: 'uint256', indexed: false },
+  ]},
+  '0xa3b9472a1399e17e123f3c2e6586c23e504184d504de59cdaa2b375e880c6184': { name: 'SupplyCollateral', inputs: [
+    { name: 'id',       type: 'bytes32', indexed: true  },
+    { name: 'caller',   type: 'address', indexed: true  },
+    { name: 'onBehalf', type: 'address', indexed: true  },
+    { name: 'assets',   type: 'uint256', indexed: false },
+  ]},
+  '0x570954540bed6b1304a87dfe815a5eda4a648f7097a16240dcd85c9b5fd42a43': { name: 'Borrow', inputs: [
+    { name: 'id',       type: 'bytes32', indexed: true  },
+    { name: 'caller',   type: 'address', indexed: false },
+    { name: 'onBehalf', type: 'address', indexed: true  },
+    { name: 'receiver', type: 'address', indexed: true  },
+    { name: 'assets',   type: 'uint256', indexed: false },
+    { name: 'shares',   type: 'uint256', indexed: false },
+  ]},
+  '0x52acb05cebbd3cd39715469f22afbf5a17496295ef3bc9bb5944056c63ccaa09': { name: 'Repay', inputs: [
+    { name: 'id',       type: 'bytes32', indexed: true  },
+    { name: 'caller',   type: 'address', indexed: true  },
+    { name: 'onBehalf', type: 'address', indexed: true  },
+    { name: 'assets',   type: 'uint256', indexed: false },
+    { name: 'shares',   type: 'uint256', indexed: false },
+  ]},
+  '0xa56fc0ad5702ec05ce63666221f796fb62437c32db1aa1aa075fc6484cf58fbf': { name: 'Withdraw', inputs: [
+    { name: 'id',       type: 'bytes32', indexed: true  },
+    { name: 'caller',   type: 'address', indexed: false },
+    { name: 'onBehalf', type: 'address', indexed: true  },
+    { name: 'receiver', type: 'address', indexed: true  },
+    { name: 'assets',   type: 'uint256', indexed: false },
+    { name: 'shares',   type: 'uint256', indexed: false },
+  ]},
+  '0xe80ebd7cc9223d7382aab2e0d1d6155c65651f83d53c8b9b06901d167e321142': { name: 'WithdrawCollateral', inputs: [
+    { name: 'id',       type: 'bytes32', indexed: true  },
+    { name: 'caller',   type: 'address', indexed: false },
+    { name: 'onBehalf', type: 'address', indexed: true  },
+    { name: 'receiver', type: 'address', indexed: true  },
+    { name: 'assets',   type: 'uint256', indexed: false },
+  ]},
+  '0xa4946ede45d0c6f06a0f5ce92c9ad3b4751452d2fe0e25010783bcab57a67e41': { name: 'Liquidate', inputs: [
+    { name: 'id',              type: 'bytes32', indexed: true  },
+    { name: 'caller',          type: 'address', indexed: true  },
+    { name: 'borrower',        type: 'address', indexed: true  },
+    { name: 'repaidAssets',    type: 'uint256', indexed: false },
+    { name: 'repaidShares',    type: 'uint256', indexed: false },
+    { name: 'seizedAssets',    type: 'uint256', indexed: false },
+    { name: 'badDebtAssets',   type: 'uint256', indexed: false },
+    { name: 'badDebtShares',   type: 'uint256', indexed: false },
+  ]},
+  '0xc76f1b4fe4396ac07a9fa55a415d4ca430e72651d37d3401f3bed7cb13fc4f12': { name: 'FlashLoan', inputs: [
+    { name: 'caller', type: 'address', indexed: true  },
+    { name: 'token',  type: 'address', indexed: true  },
+    { name: 'assets', type: 'uint256', indexed: false },
+  ]},
+  // Euler V2
+  '0xdcbc1c05240f31ff3ad067ef1ee35ce4997762752e3a095284754544f4c709d7': { name: 'Deposit', inputs: [
+    { name: 'caller', type: 'address', indexed: true  },
+    { name: 'owner',  type: 'address', indexed: true  },
+    { name: 'assets', type: 'uint256', indexed: false },
+    { name: 'shares', type: 'uint256', indexed: false },
+  ]},
+  '0xfbde797d201c681b91056529119e0b02407c7bb96a4a2c75c01fc9667232c8db': { name: 'Withdraw', inputs: [
+    { name: 'caller',   type: 'address', indexed: true  },
+    { name: 'receiver', type: 'address', indexed: true  },
+    { name: 'owner',    type: 'address', indexed: true  },
+    { name: 'assets',   type: 'uint256', indexed: false },
+    { name: 'shares',   type: 'uint256', indexed: false },
+  ]},
+  '0xcbc04eca7e9da35cb1393a6135a199ca52e450d5e9251cbd99f7847d33a36750': { name: 'Borrow', inputs: [
+    { name: 'account', type: 'address', indexed: true  },
+    { name: 'assets',  type: 'uint256', indexed: false },
+  ]},
+  '0x5c16de4f8b59bd9caf0f49a545f25819a895ed223294290b408242e72a594231': { name: 'Repay', inputs: [
+    { name: 'account', type: 'address', indexed: true  },
+    { name: 'assets',  type: 'uint256', indexed: false },
+  ]},
+  // Compound V3
+  '0xd1cf3d156d5f8f0d50f6c122ed609cec09d35c9b9fb3fff6ea0959134dae424e': { name: 'Supply', inputs: [
+    { name: 'from',   type: 'address', indexed: true  },
+    { name: 'dst',    type: 'address', indexed: true  },
+    { name: 'amount', type: 'uint256', indexed: false },
+  ]},
+  '0x9b1bfa7fa9ee420a16e124f794c35ac9f90472acc99140eb2f6447c714cad8eb': { name: 'Withdraw', inputs: [
+    { name: 'src',    type: 'address', indexed: true  },
+    { name: 'to',     type: 'address', indexed: true  },
+    { name: 'amount', type: 'uint256', indexed: false },
+  ]},
+  '0x1547a878dc89ad3c367b6338b4be6a65a5dd74fb77ae044da1e8747ef1f4f62f': { name: 'AbsorbDebt', inputs: [
+    { name: 'absorber',   type: 'address', indexed: true  },
+    { name: 'borrower',   type: 'address', indexed: true  },
+    { name: 'basePaidOut', type: 'uint256', indexed: false },
+    { name: 'usdValue',    type: 'uint256', indexed: false },
+  ]},
+  // Moonwell / Compound V2
+  '0x4c209b5fc8ad50758f13e2e1088ba56a560dff690a1c6fef26394f4c03821c4f': { name: 'Mint', inputs: [
+    { name: 'minter',     type: 'address', indexed: false },
+    { name: 'mintAmount', type: 'uint256', indexed: false },
+    { name: 'mintTokens', type: 'uint256', indexed: false },
+  ]},
+  '0xe5b754fb1abb7f01b499791d0b820ae3b6af3424ac1c59768edb53f4ec31a929': { name: 'Redeem', inputs: [
+    { name: 'redeemer',      type: 'address', indexed: false },
+    { name: 'redeemAmount',  type: 'uint256', indexed: false },
+    { name: 'redeemTokens',  type: 'uint256', indexed: false },
+  ]},
+  '0x13ed6866d4e1ee6da46f845c46d7e54120883d75c5ea9a2dacc1c4ca8984ab80': { name: 'Borrow', inputs: [
+    { name: 'borrower',          type: 'address', indexed: false },
+    { name: 'borrowAmount',      type: 'uint256', indexed: false },
+    { name: 'accountBorrows',    type: 'uint256', indexed: false },
+    { name: 'totalBorrows',      type: 'uint256', indexed: false },
+  ]},
+  '0x1a2a22cb034d26d1854bdc6a1da3f587a5e8bb8e7ac2b96cb5b9c70620d8bc8a': { name: 'RepayBorrow', inputs: [
+    { name: 'payer',             type: 'address', indexed: false },
+    { name: 'borrower',          type: 'address', indexed: false },
+    { name: 'repayAmount',       type: 'uint256', indexed: false },
+    { name: 'accountBorrows',    type: 'uint256', indexed: false },
+    { name: 'totalBorrows',      type: 'uint256', indexed: false },
+  ]},
+  // Balancer FlashLoan
+  '0x0d7d75e01ab95780d3cd1c8ec0dd6c2ce19e3a20427eec8bf53283b6fb8e95f0': { name: 'FlashLoan', inputs: [
+    { name: 'recipient',  type: 'address', indexed: true  },
+    { name: 'token',      type: 'address', indexed: true  },
+    { name: 'amount',     type: 'uint256', indexed: false },
+    { name: 'feeAmount',  type: 'uint256', indexed: false },
+  ]},
+}
+
+// ── Log decoding ───────────────────────────────────────────────────────────
+
+/** Split a top-level comma-separated param string, respecting nested parens. */
+function splitTopLevel(s: string): string[] {
+  const parts: string[] = []
+  let depth = 0, current = ''
+  for (const ch of s) {
+    if (ch === '(') depth++
+    else if (ch === ')') depth--
+    if (ch === ',' && depth === 0) { parts.push(current); current = '' }
+    else current += ch
+  }
+  if (current) parts.push(current)
+  return parts
+}
+
+/**
+ * Parse a Sourcify text signature into AbiEventInput[] using a heuristic:
+ * the first `indexedCount` params are treated as indexed (they appear in topics[1..]).
+ * This matches most common events but may be wrong when non-indexed params
+ * precede indexed ones (e.g. Uniswap V3 Mint's `sender` param).
+ * For those events the explicit EVENT_ABI_MAP takes precedence.
+ */
+function parseEventSig(sig: string, indexedCount: number): AbiEventInput[] | null {
+  const m = sig.match(/^[A-Za-z0-9_$]+\((.*)\)$/)
+  if (!m) return null
+  const inner = m[1]
+  if (!inner) return []
+  return splitTopLevel(inner).map((t, i) => ({
+    name: `arg${i}`,
+    type: t.trim().replace(/\s+indexed/, ''),
+    indexed: i < indexedCount,
+  }))
+}
+
+/** Decode a single 32-byte indexed topic into a DecodedValue.
+ *  Dynamic types (bytes/string/arrays) are stored as keccak256 hashes — returned as bytes32. */
+function decodeIndexedTopic(topic: string, type: string, components?: AbiInput[]): DecodedValue {
+  if (type === 'bytes' || type === 'string' || type.endsWith('[]') || type === 'tuple') {
+    return { kind: 'bytes_fixed', hex: topic, size: 32 }
+  }
+  try {
+    return decodeValue(hexToBytes(topic), type, components, 0, 0)
+  } catch {
+    return { kind: 'bytes_fixed', hex: topic, size: 32 }
+  }
+}
+
+/**
+ * Decode a log entry.
+ * Uses EVENT_ABI_MAP for known events; falls back to parsing `dynamicSig`
+ * (full text signature from Sourcify) with an indexed-first heuristic.
+ */
+export function decodeLog(
+  topics: string[],
+  data: string,
+  topic0: string,
+  dynamicSig?: string,
+): DecodedLog | null {
+  let abi = EVENT_ABI_MAP[topic0]
+
+  if (!abi && dynamicSig) {
+    const indexedCount = Math.max(0, topics.length - 1)
+    const inputs = parseEventSig(dynamicSig, indexedCount)
+    if (inputs) abi = { name: dynamicSig.split('(')[0], inputs }
+  }
+
+  if (!abi) return null
+
+  // Pre-decode all non-indexed params from data
+  const dataInputs = abi.inputs.filter((i) => !i.indexed)
+  const dataValues: DecodedValue[] = []
+  if (dataInputs.length > 0 && data && data !== '0x') {
+    try {
+      const dataBytes = hexToBytes(data)
+      let off = 0
+      for (const inp of dataInputs) {
+        dataValues.push(decodeValue(dataBytes, inp.type, inp.components, off, 0))
+        off += headSize(inp.type, inp.components)
+      }
+    } catch { /* leave dataValues empty on malformed data */ }
+  }
+
+  // Build params in original ABI declaration order
+  const params: DecodedLog['params'] = []
+  let topicIdx = 1
+  let dataIdx  = 0
+  for (const inp of abi.inputs) {
+    if (inp.indexed) {
+      const topic = topics[topicIdx++]
+      const value = topic
+        ? decodeIndexedTopic(topic, inp.type, inp.components)
+        : { kind: 'unknown' as const, type: inp.type }
+      params.push({ name: inp.name, type: inp.type, indexed: true, value })
+    } else {
+      const value = dataValues[dataIdx++] ?? { kind: 'unknown' as const, type: inp.type }
+      params.push({ name: inp.name, type: inp.type, indexed: false, value })
+    }
+  }
+
+  return { name: abi.name, params }
+}

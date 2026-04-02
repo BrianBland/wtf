@@ -35,6 +35,7 @@ export const KNOWN_PROTOCOLS: Record<string, ProtocolInfo> = {
   // Aerodrome (classic AMM + Slipstream CL)
   '0xcf77a3ba9a5ca399b7c97c74d54e5b1beb874e43': { name: 'Aerodrome Router',         type: 'dex' },
   '0x420dd381b31aef6683db6b902084cb0ffece40da': { name: 'Aerodrome Factory',         type: 'dex' },
+  '0xade65c38cd4849adba595a4323a8c7ddfe89716a': { name: 'Aerodrome V2 Factory',      type: 'dex' },
   '0x827922686190fd9b3eb5c2af8154a8ab3efb61d5': { name: 'Aerodrome Voter',           type: 'dex' },
   '0x5e7bb104d84c7cb9b682aac2f3d509f5f406809a': { name: 'Aerodrome CL Factory',      type: 'dex' },
   '0xbe6d8f0d05cc4be24d5167a3ef062215be6d18a5': { name: 'Aerodrome CL SwapRouter',   type: 'dex' },
@@ -48,6 +49,14 @@ export const KNOWN_PROTOCOLS: Record<string, ProtocolInfo> = {
   // BaseSwap
   '0xaed85e1d0c7e6e18335b9ea858ce1ab06934eab5': { name: 'BaseSwap V3 Factory',       type: 'dex' },
   '0xfda619b6d20975be80a10332cd39b9a4b0faa8bb': { name: 'BaseSwap V2 Factory',       type: 'dex' },
+  // Alien Base
+  '0x0fd83557b2be93617c9c1c1b6fd549401c74558c': { name: 'Alien Base V3 Factory',     type: 'dex' },
+  // Solidly V3
+  '0x70fe4a44ea505cfa3a57b95cf2862d4fd5f0f687': { name: 'Solidly V3 Factory',        type: 'dex' },
+  // Equalizer
+  '0xed8db60acc29e14bc867a497d94ca6e3ceb5ec04': { name: 'Equalizer Factory',          type: 'dex' },
+  // Hydrex
+  '0x36077d39cdc65e1e3fb65810430e5b2c4d5fa29e': { name: 'Hydrex Factory',             type: 'dex' },
   // Balancer V2
   '0xba12222222228d8ba445958a75a0704d566bf2c8': { name: 'Balancer V2 Vault',         type: 'dex' },
   // Aave V3
@@ -191,6 +200,9 @@ export const AMM_BURN_TOPIC        = '0xdccd412f0b1252819cb1fd330b93224ca4261289
 // Uniswap V3 / Aerodrome Slipstream pool Mint (concentrated liquidity pool-level event)
 // Mint(address sender, address indexed owner, int24 indexed tickLower, int24 indexed tickUpper, uint128 amount, uint256 amount0, uint256 amount1)
 export const UNI_V3_POOL_MINT_TOPIC = '0x7a53080ba414158be7ec69b987b5fb7d07dee101fe85488f0853ae16239d0bde'
+// Uniswap V3 / Aerodrome Slipstream pool Burn (concentrated liquidity pool-level event)
+// Burn(address indexed owner, int24 indexed tickLower, int24 indexed tickUpper, uint128 amount, uint256 amount0, uint256 amount1)
+export const UNI_V3_POOL_BURN_TOPIC  = '0x0c396cd989a39f4459b5fa1aed6a9a8dcdbc45908acfd67e028cd568da98982c'
 // Uniswap V3 NonfungiblePositionManager LP events
 // IncreaseLiquidity(uint256 indexed tokenId, uint128 liquidity, uint256 amount0, uint256 amount1)
 export const UNI_V3_INCREASE_LIQ_TOPIC = '0x3067048beee31b25b2f1681f88dac838c8bba36af25bfb2b7cf7473a5847e35c'
@@ -231,6 +243,13 @@ export const COMPOUND3_SUPPLY_TOPIC   = '0xd1cf3d156d5f8f0d50f6c122ed609cec09d35
 export const COMPOUND3_WITHDRAW_TOPIC = '0x9b1bfa7fa9ee420a16e124f794c35ac9f90472acc99140eb2f6447c714cad8eb'
 // AbsorbDebt(address indexed absorber, address indexed borrower, uint256 basePaidOut, uint256 usdValue) — liquidation
 export const COMPOUND3_ABSORB_TOPIC   = '0x1547a878dc89ad3c367b6338b4be6a65a5dd74fb77ae044da1e8747ef1f4f62f'
+// Flash loan events
+// Aave V3: FlashLoan(address indexed target, address indexed initiator, address indexed asset, uint256 amount, uint8 interestRateMode, uint256 premium, uint16 referralCode)
+export const AAVE_FLASH_LOAN_TOPIC     = '0x631042c832b07452973831137f2d73e395028b44b250dedc5abb0ee766e168ac'
+// Morpho Blue: FlashLoan(address indexed caller, address indexed token, uint256 assets)
+export const MORPHO_FLASH_LOAN_TOPIC   = '0xc76f1b4fe4396ac07a9fa55a415d4ca430e72651d37d3401f3bed7cb13fc4f12'
+// Balancer V2: FlashLoan(address indexed recipient, address indexed token, uint256 amount, uint256 feeAmount)
+export const BALANCER_FLASH_LOAN_TOPIC = '0x0d7d75e01ab95780d3cd1c8ec0dd6c2ce19e3a20427eec8bf53283b6fb8e95f0'
 
 // ── Protocol brand colors ─────────────────────────────────────────────────
 // Shared across Histogram, ProtocolDrillDown, and any other component that
@@ -249,6 +268,10 @@ export const PROTOCOL_COLORS: Record<string, string> = {
   'PancakeSwap V2':  '#18a8b3',
   'SushiSwap V2':    '#e0478d',
   'BaseSwap V2':     '#3a78c9',
+  'Alien Base V3':   '#7b42f6',
+  'Solidly V3':      '#e8a020',
+  'Equalizer':       '#00c896',
+  'Hydrex':          '#2ec4f0',
   // DEX — other
   'Balancer V2':     '#aea8f5',
   // Lending
@@ -260,4 +283,81 @@ export const PROTOCOL_COLORS: Record<string, string> = {
   'Moonwell':        '#7cfc00',
   // Fallback
   'Unknown':         '#555',
+  'Unknown CL':      '#555',
+  'Unknown AMM':     '#555',
+}
+
+// ── Protocol classification ────────────────────────────────────────────────
+// Maps protocol name → UI group label. Unlisted protocols fall back to 'Other'.
+
+// ── Known event topic hashes → human-readable event names ─────────────────
+// Used by TopicTag to label log.topics[0] without a network lookup.
+
+export const KNOWN_TOPICS: Record<string, string> = {
+  [TRANSFER_TOPIC]:                    'Transfer',
+  [APPROVAL_TOPIC]:                    'Approval',
+  [UNI_V3_SWAP_TOPIC]:                 'Swap (V3)',
+  [AMM_SWAP_TOPIC]:                    'Swap (AMM)',
+  [AAVE_SUPPLY_TOPIC]:                 'Supply',
+  [AAVE_WITHDRAW_TOPIC]:               'Withdraw',
+  [AAVE_BORROW_TOPIC]:                 'Borrow',
+  [AAVE_REPAY_TOPIC]:                  'Repay',
+  [AAVE_LIQUIDATION_TOPIC]:            'LiquidationCall',
+  [COMPOUND_MINT_TOPIC]:               'Mint',
+  [COMPOUND_REDEEM_TOPIC]:             'Redeem',
+  [COMPOUND_BORROW_TOPIC]:             'Borrow',
+  [COMPOUND_REPAY_TOPIC]:              'RepayBorrow',
+  [AMM_BURN_TOPIC]:                    'Burn',
+  [UNI_V3_POOL_MINT_TOPIC]:            'Mint (V3)',
+  [UNI_V3_POOL_BURN_TOPIC]:            'Burn (V3)',
+  [UNI_V3_INCREASE_LIQ_TOPIC]:         'IncreaseLiquidity',
+  [UNI_V3_DECREASE_LIQ_TOPIC]:         'DecreaseLiquidity',
+  [UNI_V3_COLLECT_TOPIC]:              'Collect',
+  [BALANCER_SWAP_TOPIC]:               'Swap (Balancer)',
+  [MORPHO_SUPPLY_TOPIC]:               'Supply',
+  [MORPHO_SUPPLY_COLLATERAL_TOPIC]:    'SupplyCollateral',
+  [MORPHO_BORROW_TOPIC]:               'Borrow',
+  [MORPHO_REPAY_TOPIC]:                'Repay',
+  [MORPHO_WITHDRAW_TOPIC]:             'Withdraw',
+  [MORPHO_WITHDRAW_COLLATERAL_TOPIC]:  'WithdrawCollateral',
+  [MORPHO_LIQUIDATE_TOPIC]:            'Liquidate',
+  [EULER_DEPOSIT_TOPIC]:               'Deposit',
+  [EULER_WITHDRAW_TOPIC]:              'Withdraw',
+  [EULER_BORROW_TOPIC]:                'Borrow',
+  [EULER_REPAY_TOPIC]:                 'Repay',
+  [COMPOUND3_SUPPLY_TOPIC]:            'Supply',
+  [COMPOUND3_WITHDRAW_TOPIC]:          'Withdraw',
+  [COMPOUND3_ABSORB_TOPIC]:            'AbsorbDebt',
+  [AAVE_FLASH_LOAN_TOPIC]:             'FlashLoan',
+  [MORPHO_FLASH_LOAN_TOPIC]:           'FlashLoan',
+  [BALANCER_FLASH_LOAN_TOPIC]:         'FlashLoan',
+}
+
+export const PROTOCOL_CLASSIFICATION: Record<string, string> = {
+  // Concentrated Liquidity (tick-based CL AMMs)
+  'Uniswap V3':      'Concentrated Liquidity',
+  'Aerodrome CL':    'Concentrated Liquidity',
+  'Unknown CL':      'Concentrated Liquidity',
+  'PancakeSwap V3':  'Concentrated Liquidity',
+  'SushiSwap V3':    'Concentrated Liquidity',
+  'BaseSwap V3':     'Concentrated Liquidity',
+  'Alien Base V3':   'Concentrated Liquidity',
+  'Solidly V3':      'Concentrated Liquidity',
+  'Hydrex':          'Concentrated Liquidity',
+  // Classic AMM (constant-product / Solidly-style)
+  'Uniswap V2':      'Classic AMM',
+  'Aerodrome':       'Classic AMM',
+  'Unknown AMM':     'Classic AMM',
+  'PancakeSwap V2':  'Classic AMM',
+  'SushiSwap V2':    'Classic AMM',
+  'BaseSwap V2':     'Classic AMM',
+  'Equalizer':       'Classic AMM',
+  'Balancer V2':     'Classic AMM',
+  // Lending / money markets
+  'Aave V3':         'Lending',
+  'Seamless':        'Lending',
+  'Morpho Blue':     'Lending',
+  'Euler':           'Lending',
+  'Compound V3':     'Lending',
+  'Moonwell':        'Lending',
 }

@@ -63,12 +63,15 @@ function BlockTicker() {
 // ── App ───────────────────────────────────────────────────────────────────
 
 export default function App() {
-  const { nav, goto, connected, initialized } = useStore()
+  const { nav, goto, initialized, connect, connected } = useStore()
 
-  // On mount: read hash → set initial nav state
+  // On mount: read hash → set initial nav state + auto-connect if not on config
   useEffect(() => {
     const initial = parseHash(window.location.hash)
-    if (initial.view !== 'config') goto(initial)
+    if (initial.view !== 'config') {
+      goto(initial)
+      connect()  // auto-connect using saved (or default) RPC URL
+    }
 
     const onHashChange = () => {
       const next = parseHash(window.location.hash)

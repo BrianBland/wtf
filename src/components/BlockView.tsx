@@ -1,4 +1,4 @@
-import { useMemo, useState, useRef, useEffect, useCallback } from 'react'
+import { useMemo, useState, useRef, useEffect } from 'react'
 import { useStore } from '../store'
 import { Block, Transaction, TokenFlow } from '../types'
 import { BlockStateAccessView } from './BlockStateAccessView'
@@ -15,7 +15,11 @@ import { CallAggregationsView } from './CallAggregationsView'
 import { DecodedCallView } from './TxView'
 import { KNOWN_TOKENS, KNOWN_PROTOCOLS, KNOWN_SELECTORS } from '../lib/protocols'
 import { formatEth, formatGas, formatGwei, formatTimestamp, formatAge, formatNumber, shortHash } from '../lib/formatters'
-import { flashblockCount, effectivePriorityFee } from '../lib/flashblocks'
+function effectivePriorityFee(tx: import('../types').Transaction, baseFee: bigint): bigint {
+  if (tx.maxPriorityFeePerGas !== undefined) return tx.maxPriorityFeePerGas
+  if (tx.gasPrice !== undefined) return tx.gasPrice > baseFee ? tx.gasPrice - baseFee : 0n
+  return 0n
+}
 import { computeParallelization, aggregateKeys } from '../lib/stateAccess'
 
 // ── DeFi action glyphs ────────────────────────────────────────────────────
@@ -177,8 +181,8 @@ function BlockHistograms({
           <button className={`topbar-btn ${sortBy === 'txs' ? 'active' : ''}`}
             style={{ fontSize: 9, padding: '1px 7px' }} onClick={() => onSortBy('txs')}>txs</button>
           <button className={`topbar-btn ${sortBy === 'gas' ? 'active' : ''}`}
-            style={{ fontSize: 9, padding: '1px 7px' }} title="Gas limit (not gasUsed — proxy only)"
-            onClick={() => onSortBy('gas')}>gas lim</button>
+            style={{ fontSize: 9, padding: '1px 7px' }} title="Sort by gas used"
+            onClick={() => onSortBy('gas')}>gas</button>
         </div>
       </div>
 
@@ -309,8 +313,10 @@ function TxRow({ tx, baseFee, selected, onClick }: { tx: Transaction; baseFee: b
       </div>
 
       {/* Gas + fee — fixed width, always at right edge */}
-      <div style={{ width: 80, textAlign: 'right', flexShrink: 0, fontVariantNumeric: 'tabular-nums', lineHeight: 1.3 }}>
-        <div style={{ fontSize: 10, color: 'var(--text2)' }}>{formatGas(gasUsed)}</div>
+      <div style={{ width: 96, textAlign: 'right', flexShrink: 0, fontVariantNumeric: 'tabular-nums', lineHeight: 1.3 }}>
+        <div style={{ fontSize: 10, color: 'var(--text2)' }}>
+          {formatGas(gasUsed)}<span style={{ color: 'var(--text3)' }}>/{formatGas(tx.gas)}</span>
+        </div>
         <div style={{ fontSize: 9, color: tipColor(tip) }}>+{formatGwei(tip)}</div>
       </div>
 
@@ -366,7 +372,7 @@ function TxQuickDetail({ tx, blockNumber }: { tx: Transaction; blockNumber: numb
         {tx.input && tx.input !== '0x' && tx.methodSelector && (
           <section>
             <div className="panel-header" style={{ fontSize: 10 }}>Call</div>
-            <DecodedCallView input={tx.input} selector={tx.methodSelector} />
+            <DecodedCallView key={tx.hash} input={tx.input} selector={tx.methodSelector} />
           </section>
         )}
 
@@ -572,27 +578,9 @@ function CollapsibleProtocols({ block, onSelectTx }: { block: Block; onSelectTx:
 function CollapsibleMetaSankey({ block }: { block: Block }) {
   const [open, setOpen]         = useState(false)
   const [expanded, setExpanded] = useState(false)
-  const [selectedFBs, setSelectedFBs] = useState(() => new Set<number>())
   const { ref, isFullscreen, toggle: toggleFullscreen } = useFullscreen()
-  const resolveFlashblocks = useStore((s) => s.resolveFlashblocks)
 
-  const fbMap   = useMemo(() => resolveFlashblocks(block.number, block.transactions, block.baseFeePerGas), [block.number, block.transactions, block.baseFeePerGas, resolveFlashblocks])
-  const fbCount = flashblockCount(fbMap)
-
-  const filteredBlock = useMemo(() => {
-    if (selectedFBs.size === 0) return block
-    return { ...block, transactions: block.transactions.filter(t => selectedFBs.has(fbMap.get(t.hash) ?? 0)) }
-  }, [block, selectedFBs, fbMap])
-
-  const blocks = useMemo(() => [filteredBlock], [filteredBlock])
-
-  const toggleFB = useCallback((n: number) => {
-    setSelectedFBs(prev => {
-      const next = new Set(prev)
-      if (next.has(n)) next.delete(n); else next.add(n)
-      return next
-    })
-  }, [])
+  const blocks = useMemo(() => [block], [block])
 
   return (
     <div
@@ -611,27 +599,6 @@ function CollapsibleMetaSankey({ block }: { block: Block }) {
           Value Flow
         </span>
         <span className="count">senders → pools → recipients</span>
-
-        {/* Flashblock filter pills */}
-        {open && fbCount > 1 && (
-          <div style={{ display: 'flex', gap: 2, marginLeft: 8, alignItems: 'center' }}>
-            <span style={{ fontSize: 8, color: 'var(--text3)' }}>fb:</span>
-            <button
-              className={`topbar-btn ${selectedFBs.size === 0 ? 'active' : ''}`}
-              style={{ fontSize: 8, padding: '0px 5px' }}
-              onClick={(e) => { e.stopPropagation(); setSelectedFBs(new Set()) }}
-            >all</button>
-            {Array.from({ length: fbCount }, (_, i) => (
-              <button
-                key={i}
-                className={`topbar-btn ${selectedFBs.has(i) ? 'active' : ''}`}
-                style={{ fontSize: 8, padding: '0px 5px' }}
-                title={`Flashblock ${i}${i === 0 ? ' (system tx)' : ''}`}
-                onClick={(e) => { e.stopPropagation(); toggleFB(i) }}
-              >{i}</button>
-            ))}
-          </div>
-        )}
 
         {open && (
           <div style={{ marginLeft: 'auto', display: 'flex', gap: 4 }}>
@@ -743,6 +710,28 @@ function CollapsibleCallAggregations({ block }: { block: Block }) {
 }
 
 const EMPTY_HIST_FILTER: HistogramFilter = { sender: null, recipient: null, selector: null }
+
+// ── Text filter with wildcard support ─────────────────────────────────────
+
+function patternToRegex(pattern: string): RegExp {
+  const esc = pattern.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*').replace(/\?/g, '.')
+  // If the pattern contains explicit wildcards, require full-string match; otherwise substring match
+  const hasWildcard = /[*?]/.test(pattern)
+  return hasWildcard ? new RegExp(`^${esc}$`, 'i') : new RegExp(esc, 'i')
+}
+
+function matchesTxText(tx: Transaction, text: string): boolean {
+  const t = text.trim()
+  if (!t) return true
+  const fromM = t.match(/^from:(.+)/i)
+  if (fromM) return patternToRegex(fromM[1]).test(tx.from)
+  const toM = t.match(/^to:(.+)/i)
+  if (toM) return tx.to ? patternToRegex(toM[1]).test(tx.to) : false
+  const hashM = t.match(/^hash:(.+)/i)
+  if (hashM) return patternToRegex(hashM[1]).test(tx.hash)
+  const re = patternToRegex(t)
+  return re.test(tx.hash) || re.test(tx.from) || (tx.to ? re.test(tx.to) : false)
+}
 
 // ── Trace stats bar ───────────────────────────────────────────────────────
 
@@ -858,14 +847,33 @@ function TraceStatsBar({ block }: { block: Block }) {
   )
 }
 
+// ── URL filter sync ───────────────────────────────────────────────────────
+
+function readFiltersFromUrl() {
+  const p = new URLSearchParams(window.location.search)
+  const typeParam = p.get('type') ?? ''
+  return {
+    txTypeFilter: (['eth', 'tokens', 'defi'].includes(typeParam) ? typeParam as TxFilter : 'all'),
+    histFilter: {
+      sender:    p.get('from') || null,
+      recipient: p.get('to')   || null,
+      selector:  p.get('sel')  || null,
+    } as HistogramFilter,
+    textFilter: p.get('q') ?? '',
+    sortBy:     (p.get('sort') === 'gas' ? 'gas' : 'txs') as SortKey,
+  }
+}
+
 // ── Main block view ───────────────────────────────────────────────────────
 
 export function BlockView({ blockNumber }: { blockNumber: number }) {
   const { blocks, blockLoading, fetchBlock, connected } = useStore()
   const [selectedTx, setSelectedTx] = useState<string | null>(null)
-  const [txTypeFilter, setTxTypeFilter] = useState<TxFilter>('all')
-  const [histFilter, setHistFilter] = useState<HistogramFilter>(EMPTY_HIST_FILTER)
-  const [sortBy, setSortBy] = useState<SortKey>('txs')
+  const init = readFiltersFromUrl()
+  const [txTypeFilter, setTxTypeFilter] = useState<TxFilter>(init.txTypeFilter)
+  const [histFilter, setHistFilter] = useState<HistogramFilter>(init.histFilter)
+  const [textFilter, setTextFilter] = useState(init.textFilter)
+  const [sortBy, setSortBy] = useState<SortKey>(init.sortBy)
   const txListRef = useRef<HTMLDivElement>(null)
 
   // When a tx is selected from the sankey, scroll it into view in the list
@@ -879,6 +887,21 @@ export function BlockView({ blockNumber }: { blockNumber: number }) {
   useEffect(() => {
     if (!blocks.has(blockNumber) && connected) fetchBlock(blockNumber)
   }, [blockNumber, connected])
+
+  // Sync active filters to URL query params
+  useEffect(() => {
+    const p = new URLSearchParams()
+    if (txTypeFilter !== 'all')   p.set('type', txTypeFilter)
+    if (histFilter.sender)        p.set('from', histFilter.sender)
+    if (histFilter.recipient)     p.set('to',   histFilter.recipient)
+    if (histFilter.selector)      p.set('sel',  histFilter.selector)
+    if (textFilter)               p.set('q',    textFilter)
+    if (sortBy !== 'txs')         p.set('sort', sortBy)
+    const search = p.toString() ? `?${p.toString()}` : ''
+    if (window.location.search !== search) {
+      window.history.replaceState(null, '', `${window.location.pathname}${search}${window.location.hash}`)
+    }
+  }, [txTypeFilter, histFilter, textFilter, sortBy])
 
   const block = blocks.get(blockNumber)
   const loading = blockLoading.has(blockNumber)
@@ -903,6 +926,7 @@ export function BlockView({ blockNumber }: { blockNumber: number }) {
     if (histFilter.sender    && tx.from !== histFilter.sender) return false
     if (histFilter.recipient && tx.to   !== histFilter.recipient) return false
     if (histFilter.selector  && tx.methodSelector !== histFilter.selector) return false
+    if (!matchesTxText(tx, textFilter)) return false
     return true
   })
 
@@ -951,6 +975,17 @@ export function BlockView({ blockNumber }: { blockNumber: number }) {
             {f}
           </button>
         ))}
+        <input
+          type="text"
+          value={textFilter}
+          onChange={(e) => setTextFilter(e.target.value)}
+          placeholder="filter… 0xc0ff* from:0xc0ff*"
+          style={{
+            fontSize: 10, padding: '2px 6px', background: 'var(--surface2)',
+            border: '1px solid var(--border)', borderRadius: 3, color: 'var(--text)',
+            outline: 'none', width: 190, flexShrink: 0,
+          }}
+        />
 
         {/* Active histogram filter chips */}
         {histFilter.sender && (

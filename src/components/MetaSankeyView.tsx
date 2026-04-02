@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState, useEffect, useCallback } from 'react'
+import { useMemo, useRef, useState, useEffect, useLayoutEffect, useCallback } from 'react'
 import { Block } from '../types'
 import { useStore } from '../store'
 import { buildPoolActivity } from '../lib/poolActivity'
@@ -176,14 +176,30 @@ function metaToSankeyEdge(
 
 // ── Main component ─────────────────────────────────────────────────────────
 
+type ActivityFilter = 'all' | 'swaps' | 'liquidity'
+
+function filterBlocksByActivity(blocks: Block[], activity: ActivityFilter): Block[] {
+  if (activity === 'all') return blocks
+  return blocks.map((b) => ({
+    ...b,
+    transactions: b.transactions.filter((tx) => {
+      if (activity === 'swaps')     return tx.protocols.some((e) => e.action === 'Swap')
+      if (activity === 'liquidity') return tx.protocols.some((e) => e.action === 'AddLiquidity' || e.action === 'RemoveLiquidity')
+      return true
+    }),
+  }))
+}
+
 export function MetaSankeyView({ blocks, targetHeight }: { blocks: Block[]; targetHeight?: number }) {
   const { poolCache, fetchPool, ethPriceUSD, btcPriceUSD, tokenCache, fetchToken } = useStore()
   const [showNet, setShowNet]           = useState(false)
+  const [activity, setActivity]         = useState<ActivityFilter>('all')
   const [selectedId, setSelectedId]     = useState<string | null>(null)
   const [isFullscreen, setIsFullscreen] = useState(false)
   const containerRef = useRef<HTMLDivElement>(null)
   const svgWrapRef   = useRef<HTMLDivElement>(null)
   const dragStart    = useRef<{ x: number; y: number } | null>(null)
+  const centerXRef   = useRef(0)
   const [xform, setXform] = useState({ scale: 1, x: 0, y: 0 })
 
   useEffect(() => {
@@ -217,6 +233,14 @@ export function MetaSankeyView({ blocks, targetHeight }: { blocks: Block[]; targ
     return () => el.removeEventListener('wheel', handler)
   }, [])
 
+  useLayoutEffect(() => {
+    if (!svgWrapRef.current) return
+    const containerW = svgWrapRef.current.clientWidth
+    const cx = Math.max(0, (containerW - W) / 2)
+    centerXRef.current = cx
+    setXform({ scale: 1, x: cx, y: 0 })
+  }, [])
+
   const onMouseDown = useCallback((e: React.MouseEvent) => {
     if (e.button !== 0) return
     dragStart.current = { x: e.clientX, y: e.clientY }
@@ -229,13 +253,18 @@ export function MetaSankeyView({ blocks, targetHeight }: { blocks: Block[]; targ
     setXform(p => ({ ...p, x: p.x + dx, y: p.y + dy }))
   }, [])
   const onMouseUp   = useCallback(() => { dragStart.current = null }, [])
-  const resetZoom   = useCallback(() => setXform({ scale: 1, x: 0, y: 0 }), [])
-  const isZoomed    = xform.scale !== 1 || xform.x !== 0 || xform.y !== 0
+  const resetZoom   = useCallback(() => setXform({ scale: 1, x: centerXRef.current, y: 0 }), [])
+  const isZoomed    = xform.scale !== 1 || xform.y !== 0 || Math.abs(xform.x - centerXRef.current) > 1
+
+  const filteredBlocks = useMemo(
+    () => filterBlocksByActivity(blocks, activity),
+    [blocks, activity],
+  )
 
   const poolAddrs = useMemo(() => {
-    const activity = buildPoolActivity(blocks)
-    for (const addr of activity.keys()) fetchPool(addr)
-    return new Set(activity.keys())
+    const poolActivity = buildPoolActivity(blocks)
+    for (const addr of poolActivity.keys()) fetchPool(addr)
+    return new Set(poolActivity.keys())
   }, [blocks, fetchPool])
 
   // Trigger token fetches for pool token0/token1 once pool metadata loads
@@ -249,13 +278,13 @@ export function MetaSankeyView({ blocks, targetHeight }: { blocks: Block[]; targ
   }, [poolAddrs, poolCache, tokenCache, fetchToken])
 
   const graph = useMemo(
-    () => buildMetaFlow(blocks, poolAddrs, { netMode: showNet }),
-    [blocks, poolAddrs, showNet]
+    () => buildMetaFlow(filteredBlocks, poolAddrs, { netMode: showNet }),
+    [filteredBlocks, poolAddrs, showNet]
   )
 
   const impliedPrices = useMemo(
-    () => deriveImpliedPrices(blocks, poolAddrs, ethPriceUSD, btcPriceUSD),
-    [blocks, poolAddrs, ethPriceUSD, btcPriceUSD]
+    () => deriveImpliedPrices(filteredBlocks, poolAddrs, ethPriceUSD, btcPriceUSD),
+    [filteredBlocks, poolAddrs, ethPriceUSD, btcPriceUSD]
   )
 
   const getPoolColor = (id: string) => {
@@ -465,6 +494,13 @@ export function MetaSankeyView({ blocks, targetHeight }: { blocks: Block[]; targ
             onClick={() => setShowNet(false)}>total</button>
           <button className={`topbar-btn ${showNet ? 'active' : ''}`} style={{ fontSize: 9, padding: '1px 7px' }}
             onClick={() => setShowNet(true)}>net</button>
+          <span style={{ color: 'var(--border)', margin: '0 4px' }}>·</span>
+          <button className={`topbar-btn ${activity === 'all' ? 'active' : ''}`} style={{ fontSize: 9, padding: '1px 6px' }}
+            onClick={() => setActivity('all')}>all</button>
+          <button className={`topbar-btn ${activity === 'swaps' ? 'active' : ''}`} style={{ fontSize: 9, padding: '1px 6px' }}
+            onClick={() => setActivity('swaps')}>swaps</button>
+          <button className={`topbar-btn ${activity === 'liquidity' ? 'active' : ''}`} style={{ fontSize: 9, padding: '1px 6px' }}
+            onClick={() => setActivity('liquidity')}>liquidity</button>
           <span style={{ color: 'var(--border)', margin: '0 4px' }}>·</span>
           <button className="topbar-btn" style={{ fontSize: 11, padding: '0px 6px', lineHeight: 1 }}
             title={isFullscreen ? 'Exit fullscreen' : 'Fullscreen'}

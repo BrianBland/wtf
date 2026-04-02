@@ -9,16 +9,12 @@ A real-time Ethereum block explorer and DeFi transaction analyzer. Connect to an
 **Block view** — Deep-dive into any block:
 - **Tx aggregations** — senders, recipients, method selectors, protocol breakdown
 - **Call aggregations** — every contract call (including nested internal calls) across all txs, aggregated by contract + method, sortable by call count, gas, or tx count
-- **State access** — which storage slots were read/written by which transactions; conflict detection, parallelization analysis, flashblock segmentation
+- **State access** — which storage slots were read/written by which transactions; conflict detection, parallelization analysis
 - **Value flow** — Sankey diagram of token/ETH flows through pools and protocols
 - **Protocol activity** — per-protocol event drill-down (Uniswap V3, Aerodrome, Aave, Compound/Moonwell)
 - **Cross-tx account patterns** — accounts that appear in multiple transactions (round-trips, borrow/repay, LP add/remove, multi-swap)
 
 **Tx view** — Full transaction detail: value flows, logs, call trace, state diff.
-
-## Flashblock support
-
-WTF detects [Flashblock](https://flashbots.net) boundaries within blocks by analyzing priority fee ordering. The state access and value flow views can be filtered to individual flashblocks.
 
 ## Tech stack
 

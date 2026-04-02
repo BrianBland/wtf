@@ -6,7 +6,6 @@ import { bandPath, addrLabel } from '../lib/sankeyLayout'
 import { keyToHsl } from '../lib/colorize'
 import { shortAddr, formatGas } from '../lib/formatters'
 import { KNOWN_PROTOCOLS } from '../lib/protocols'
-import { flashblockCount, effectivePriorityFee } from '../lib/flashblocks'
 
 // ── Colors ─────────────────────────────────────────────────────────────────────
 
@@ -62,6 +61,12 @@ interface AddrSlotEdge {
 }
 
 // ── Pure helpers ───────────────────────────────────────────────────────────────
+
+function effectivePriorityFee(tx: Transaction, baseFee: bigint): bigint {
+  if (tx.maxPriorityFeePerGas !== undefined) return tx.maxPriorityFeePerGas
+  if (tx.gasPrice !== undefined) return tx.gasPrice > baseFee ? tx.gasPrice - baseFee : 0n
+  return 0n
+}
 
 function txWeight(tx: Transaction, metric: Metric, baseFee: bigint): number {
   if (metric === 'equal') return 1
@@ -142,7 +147,7 @@ const MAX_SK_OPTIONS: Array<number | 'all'> = [20, 40, 80, 150, 'all']
 // ── Main component ─────────────────────────────────────────────────────────────
 
 export function BlockStateAccessView({ block, onSelectTx }: { block: Block; onSelectTx?: (hash: string | null) => void }) {
-  const { blockStateCache, startBlockStateTrace, tokenCache, fetchToken, resolveFlashblocks } = useStore()
+  const { blockStateCache, startBlockStateTrace, tokenCache, fetchToken } = useStore()
 
   const [metric,       setMetric]      = useState<Metric>('priority')
   const [sortOrder,    setSortOrder]   = useState<SortOrder>('index')
@@ -152,7 +157,6 @@ export function BlockStateAccessView({ block, onSelectTx }: { block: Block; onSe
   const [selectedId,   setSelectedId]  = useState<string | null>(null)
   const [splitMode,    setSplitMode]   = useState(true)
   const [isFullscreen, setIsFullscreen] = useState(false)
-  const [selectedFBs,  setSelectedFBs] = useState(() => new Set<number>())
 
   // Notify parent when a tx bar is selected/deselected
   useEffect(() => {
@@ -185,19 +189,7 @@ export function BlockStateAccessView({ block, onSelectTx }: { block: Block; onSe
   const progress = cache ? `${cache.done}/${cache.total}` : '0/0'
   const pct      = cache && cache.total > 0 ? cache.done / cache.total : 0
 
-  // ── Flashblock detection (stream data when available, else inferred) ─────
-  const fbMap   = useMemo(() => resolveFlashblocks(block.number, block.transactions, block.baseFeePerGas), [block.number, block.transactions, block.baseFeePerGas, resolveFlashblocks])
-  const fbCount = flashblockCount(fbMap)
-
-  // Subset of txResults visible in the selected flashblock(s)
-  const filteredTxResults = useMemo((): Map<string, StateAccess[]> | undefined => {
-    if (!cache?.txResults || selectedFBs.size === 0) return cache?.txResults
-    const m = new Map<string, StateAccess[]>()
-    for (const [hash, accesses] of cache.txResults) {
-      if (selectedFBs.has(fbMap.get(hash) ?? 0)) m.set(hash, accesses)
-    }
-    return m
-  }, [cache?.txResults, selectedFBs, fbMap])
+  const filteredTxResults = cache?.txResults
 
   // In split mode the right column is always storage slots; account-level is implicit
   const effectiveStorageOnly = splitMode || storageOnly
@@ -289,13 +281,13 @@ export function BlockStateAccessView({ block, onSelectTx }: { block: Block; onSe
   const isZoomed   = xform.scale !== 1 || xform.x !== 0 || xform.y !== 0
 
   const sortedTxs = useMemo(() => {
-    let arr = selectedFBs.size === 0
-      ? [...block.transactions]
-      : block.transactions.filter(t => selectedFBs.has(fbMap.get(t.hash) ?? 0))
+    const arr = [...block.transactions]
+    const tip = (tx: Transaction) => tx.maxPriorityFeePerGas !== undefined ? tx.maxPriorityFeePerGas
+      : tx.gasPrice !== undefined ? (tx.gasPrice > block.baseFeePerGas ? tx.gasPrice - block.baseFeePerGas : 0n) : 0n
     if (sortOrder === 'gas-desc')      arr.sort((a, b) => Number((b.gasUsed ?? b.gas) - (a.gasUsed ?? a.gas)))
-    if (sortOrder === 'priority-desc') arr.sort((a, b) => Number(effectivePriorityFee(b, block.baseFeePerGas) - effectivePriorityFee(a, block.baseFeePerGas)))
+    if (sortOrder === 'priority-desc') arr.sort((a, b) => Number(tip(b) - tip(a)))
     return arr
-  }, [block.transactions, sortOrder, selectedFBs, fbMap])
+  }, [block.transactions, block.baseFeePerGas, sortOrder])
 
   // Parallelization stats — canonical order, filtered to visible txs
   const parallelStats = useMemo(() => {
@@ -562,32 +554,6 @@ export function BlockStateAccessView({ block, onSelectTx }: { block: Block; onSe
           {cache && cache.errors.size > 0 && <span style={{ color: 'var(--red)' }}>{cache.errors.size} failed</span>}
         </div>
 
-        {/* Flashblock filter */}
-        {fbCount > 1 && (
-          <>
-            <span style={{ color: 'var(--border)' }}>·</span>
-            <span>fb:</span>
-            <button
-              className={`topbar-btn ${selectedFBs.size === 0 ? 'active' : ''}`}
-              style={{ fontSize: 8, padding: '1px 5px' }}
-              onClick={() => setSelectedFBs(new Set())}
-            >all</button>
-            {Array.from({ length: fbCount }, (_, i) => (
-              <button
-                key={i}
-                className={`topbar-btn ${selectedFBs.has(i) ? 'active' : ''}`}
-                style={{ fontSize: 8, padding: '1px 5px' }}
-                title={`Flashblock ${i}${i === 0 ? ' (system tx)' : ''}`}
-                onClick={() => setSelectedFBs(prev => {
-                  const next = new Set(prev)
-                  if (next.has(i)) next.delete(i); else next.add(i)
-                  return next
-                })}
-              >{i}</button>
-            ))}
-          </>
-        )}
-
         <span style={{ color: 'var(--border)' }}>·</span>
         <span>TX scale:</span>
         {(['gas', 'fee', 'priority', 'equal'] as Metric[]).map(m => (
@@ -691,20 +657,6 @@ export function BlockStateAccessView({ block, onSelectTx }: { block: Block; onSe
               <text x={COL_TX   + BAR_W / 2} y={10} fontSize={8} fill="var(--text3)" textAnchor="middle">Transactions</text>
               {splitMode && <text x={COL_ADDR + BAR_W / 2} y={10} fontSize={8} fill="var(--text3)" textAnchor="middle">Addresses</text>}
               <text x={COL_SK   + BAR_W / 2} y={10} fontSize={8} fill="var(--text3)" textAnchor="middle">{splitMode ? 'Storage Slots' : 'State Keys'}</text>
-
-              {/* Flashblock boundary lines — only in block order with all FBs visible */}
-              {sortOrder === 'index' && selectedFBs.size === 0 && txLayouts.map((tl, i) => {
-                const nextFB = i + 1 < txLayouts.length ? fbMap.get(txLayouts[i + 1].tx.hash) : undefined
-                const thisFB = fbMap.get(tl.tx.hash)
-                if (nextFB === undefined || nextFB === thisFB) return null
-                const lineY = (tl.y1 + txLayouts[i + 1].y0) / 2
-                return (
-                  <g key={`fb-boundary-${i}`}>
-                    <line x1={0} y1={lineY} x2={W} y2={lineY} stroke="var(--accent)" strokeWidth={0.5} strokeDasharray="3 3" opacity={0.5} />
-                    <text x={COL_TX - 2} y={lineY - 1} fontSize={6.5} fill="var(--accent)" textAnchor="end" opacity={0.7}>fb{nextFB}</text>
-                  </g>
-                )
-              })}
 
               {/* ── Normal mode ribbons ── */}
               {!splitMode && edges.map((e, i) => {

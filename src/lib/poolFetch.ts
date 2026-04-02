@@ -12,6 +12,7 @@ export const FACTORY_PROTOCOLS: Record<string, string> = {
   // Aerodrome
   '0x5e7bb104d84c7cb9b682aac2f3d509f5f406809a': 'Aerodrome CL',   // Slipstream (V3-style)
   '0x420dd381b31aef6683db6b902084cb0ffece40da': 'Aerodrome',       // Classic AMM (V2-style)
+  '0xade65c38cd4849adba595a4323a8c7ddfe89716a': 'Aerodrome',       // V2 Factory (alternate)
   // PancakeSwap
   '0x0bfbcf9fa4f9c56b0f40a671ad40e0805a091865': 'PancakeSwap V3',
   '0x02a84c1b3bbd7401a5f7fa98a384ebc70bb5749e': 'PancakeSwap V2',
@@ -21,6 +22,14 @@ export const FACTORY_PROTOCOLS: Record<string, string> = {
   // BaseSwap
   '0xaed85e1d0c7e6e18335b9ea858ce1ab06934eab5': 'BaseSwap V3',
   '0xfda619b6d20975be80a10332cd39b9a4b0faa8bb': 'BaseSwap V2',
+  // Alien Base
+  '0x0fd83557b2be93617c9c1c1b6fd549401c74558c': 'Alien Base V3',
+  // Solidly V3
+  '0x70fe4a44ea505cfa3a57b95cf2862d4fd5f0f687': 'Solidly V3',
+  // Equalizer
+  '0xed8db60acc29e14bc867a497d94ca6e3ceb5ec04': 'Equalizer',
+  // Hydrex
+  '0x36077d39cdc65e1e3fb65810430e5b2c4d5fa29e': 'Hydrex',
 }
 
 export interface PoolMeta {

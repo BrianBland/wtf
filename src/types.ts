@@ -124,25 +124,6 @@ export interface CallTrace {
   calls?: CallTrace[]
 }
 
-// Flashblock streaming types
-
-/** One flashblock's worth of data (per-chunk, NOT cumulative). */
-export interface FlashblockChunk {
-  index:    number
-  txCount:  number   // txs in this chunk only
-  gasUsed:  bigint   // gas used by this chunk only
-}
-
-/** Live state of a block currently being built via the flashblock stream. */
-export interface LiveFlashblockState {
-  blockNumber:   number
-  payloadId:     string
-  chunks:        FlashblockChunk[]
-  totalGasUsed:  bigint
-  totalTxCount:  number
-  gasLimit:      bigint
-}
-
 // UI navigation
 export type ViewType = 'config' | 'range' | 'block' | 'tx'
 

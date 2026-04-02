@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useStore } from '../store'
-import { CallTrace } from '../types'
-import { HexTag, SelectorTag } from './HexTag'
+import { CallTrace, Log } from '../types'
+import { HexTag, SelectorTag, TopicTag } from './HexTag'
 import { CollapsibleList } from './CollapsibleList'
 import { TokenFlowList, EthFlowList, ProtocolEventList, NetFlowSummary } from './ValueFlow'
 import { KNOWN_PROTOCOLS, KNOWN_TOKENS } from '../lib/protocols'
@@ -9,7 +9,8 @@ import {
   formatEth, formatGas, formatNumber, shortAddr,
   hexToBigInt,
 } from '../lib/formatters'
-import { decodeCalldata, DecodedValue, DecodedParam } from '../lib/calldataDecoder'
+import { decodeCalldata, decodeCalldataFromSig, decodeLog, EVENT_ABI_MAP, DecodedValue, DecodedParam, DecodedCall } from '../lib/calldataDecoder'
+import { getCachedSelector, lookupSelector, getCachedEventTopic, lookupEventTopic } from '../lib/fourByte'
 
 // ── Decoded calldata view ─────────────────────────────────────────────────
 
@@ -78,16 +79,92 @@ function DecodedTupleDisplay({ fields }: { fields: DecodedParam[] }) {
   )
 }
 
+// ── Decoded log view ──────────────────────────────────────────────────────
+
+function DecodedLogView({ log }: { log: Log }) {
+  const topic0 = log.topics[0]
+
+  // Track the full Sourcify text signature for unknown events
+  const [sig, setSig] = useState<string | null>(() => {
+    if (!topic0) return null
+    const cached = getCachedEventTopic(topic0)
+    return typeof cached === 'string' ? cached : null
+  })
+
+  useEffect(() => {
+    if (!topic0) { setSig(null); return }
+    if (topic0 in EVENT_ABI_MAP) { setSig(null); return }
+    const cached = getCachedEventTopic(topic0)
+    if (typeof cached === 'string') { setSig(cached); return }
+    setSig(null)
+    if (cached === null) return
+    lookupEventTopic(topic0).then((result) => { if (result) setSig(result) })
+  }, [topic0])
+
+  const decoded = topic0 ? decodeLog(log.topics, log.data, topic0, sig ?? undefined) : null
+
+  if (decoded && decoded.params.length > 0) {
+    return (
+      <div style={{
+        background: 'var(--surface2)', border: '1px solid var(--border)',
+        borderRadius: 2, padding: '4px 8px', marginTop: 4,
+      }}>
+        {decoded.params.map((p, i) => (
+          <div key={i} style={{ display: 'flex', gap: 6, alignItems: 'center', minHeight: 18 }}>
+            <span style={{
+              color: p.indexed ? 'var(--purple)' : 'var(--text3)',
+              fontSize: 9, minWidth: 72, flexShrink: 0,
+            }}>{p.name}</span>
+            <DecodedValueDisplay value={p.value} type={p.type} />
+          </div>
+        ))}
+      </div>
+    )
+  }
+
+  // Fallback: raw display
+  return (
+    <>
+      {log.topics.map((t, ti) => (
+        <div key={ti} className="log-topic">t[{ti}]: {t}</div>
+      ))}
+      {log.data && log.data !== '0x' && (
+        <div className="log-topic" style={{ wordBreak: 'break-all', marginTop: 2 }}>
+          data: {log.data}
+        </div>
+      )}
+    </>
+  )
+}
+
 export function DecodedCallView({ input, selector }: { input: string; selector: string }) {
-  const decoded = decodeCalldata(input, selector)
+  const [sig, setSig] = useState<string | null>(() => {
+    const cached = getCachedSelector(selector)
+    return typeof cached === 'string' ? cached : null
+  })
+
+  useEffect(() => {
+    const cached = getCachedSelector(selector)
+    if (typeof cached === 'string') { setSig(cached); return }
+    setSig(null)
+    if (cached === null) return
+    lookupSelector(selector).then((result) => { if (result) setSig(result) })
+  }, [selector])
+
+  const decoded: DecodedCall | null =
+    decodeCalldata(input, selector) ??
+    (sig ? decodeCalldataFromSig(input, sig) : null)
 
   // Slice calldata body (after 4-byte selector) into 32-byte (64 hex char) words
-  const calldataBody = input.slice(10) // drop '0x' + 8 selector chars
+  const calldataBody = input.slice(10)
   const words: string[] = []
   for (let i = 0; i < calldataBody.length; i += 64) words.push(calldataBody.slice(i, i + 64))
 
+  const hasDecoded = decoded && decoded.params.length > 0
+  const byteLen = Math.floor((input.length - 2) / 2)
+
   const rawCalldata = (
-    <details open>
+    <details open={!hasDecoded && byteLen <= 100}>
       <summary style={{ cursor: 'pointer', fontSize: 9, color: 'var(--text3)', padding: '2px 12px', userSelect: 'none' }}>
         raw calldata ({Math.floor((input.length - 2) / 2)} bytes)
       </summary>
@@ -209,6 +286,66 @@ function TraceNode({
         <TraceNode key={i} node={child} depth={depth + 1} />
       ))}
     </div>
+  )
+}
+
+// ── Input tab decoded params ──────────────────────────────────────────────
+
+function InputCalldataSection({ input, selector }: { input: string; selector: string }) {
+  const [sig, setSig] = useState<string | null>(() => {
+    const cached = getCachedSelector(selector)
+    return typeof cached === 'string' ? cached : null
+  })
+
+  useEffect(() => {
+    const cached = getCachedSelector(selector)
+    if (typeof cached === 'string') { setSig(cached); return }
+    setSig(null)
+    if (cached === null) return
+    lookupSelector(selector).then((result) => { if (result) setSig(result) })
+  }, [selector])
+
+  const decoded: DecodedCall | null =
+    decodeCalldata(input, selector) ??
+    (sig ? decodeCalldataFromSig(input, sig) : null)
+
+  const hasDecoded = decoded && decoded.params.length > 0
+  const byteLen = Math.floor((input.length - 2) / 2)
+
+  return (
+    <>
+      {hasDecoded && (
+        <div style={{
+          marginBottom: 10, background: 'var(--surface2)',
+          border: '1px solid var(--border)', borderRadius: 2, padding: '6px 10px',
+        }}>
+          {decoded.params.map((p, i) => (
+            <div key={i} style={{ display: 'flex', gap: 6, alignItems: 'flex-start', marginBottom: 3 }}>
+              <span style={{ color: 'var(--text3)', fontSize: 9, flexShrink: 0, paddingTop: 1, minWidth: 80 }}>{p.name}</span>
+              <DecodedValueDisplay value={p.value} type={p.type} />
+            </div>
+          ))}
+        </div>
+      )}
+      <details open={!hasDecoded && byteLen <= 100}>
+        <summary style={{ cursor: 'pointer', fontSize: 9, color: 'var(--text3)', marginBottom: 4, userSelect: 'none' }}>
+          raw calldata
+        </summary>
+        <div style={{
+          fontSize: 10, wordBreak: 'break-all', lineHeight: 2,
+          fontFamily: 'var(--font-mono)',
+          background: 'var(--surface2)',
+          padding: '8px 10px',
+          borderRadius: 2,
+          border: '1px solid var(--border)',
+        }}>
+          <span style={{ color: 'var(--purple)' }}>{input.slice(0, 10)}</span>
+          {input.slice(10).match(/.{1,64}/g)?.map((word, i) => (
+            <span key={i} style={{ color: WORD_COLORS[i % WORD_COLORS.length] }}>{word}</span>
+          ))}
+        </div>
+      </details>
+    </>
   )
 }
 
@@ -432,22 +569,9 @@ export function TxView({ txHash, blockNumber }: { txHash: string; blockNumber: n
                   <div className="flex-center gap4" style={{ flexWrap: 'wrap', marginBottom: 2 }}>
                     <span className="muted" style={{ fontSize: 9 }}>#{log.logIndex}</span>
                     <HexTag value={log.address} type="address" />
-                    {log.topics[0] && (
-                      <span className="muted" style={{ fontSize: 9, fontFamily: 'var(--font-mono)' }}>
-                        {log.topics[0].slice(0, 10)}…
-                      </span>
-                    )}
+                    {log.topics[0] && <TopicTag topic={log.topics[0]} />}
                   </div>
-                  {log.topics.map((t, ti) => (
-                    <div key={ti} className="log-topic">
-                      t[{ti}]: {t}
-                    </div>
-                  ))}
-                  {log.data && log.data !== '0x' && (
-                    <div className="log-topic" style={{ wordBreak: 'break-all', marginTop: 2 }}>
-                      data: {log.data}
-                    </div>
-                  )}
+                  <DecodedLogView log={log} />
                 </div>
               )}
             />
@@ -465,41 +589,9 @@ export function TxView({ txHash, blockNumber }: { txHash: string; blockNumber: n
                       <span className="muted" style={{ fontSize: 9 }}>{tx.input.length / 2 - 2} bytes</span>
                     </div>
                   )}
-                  {tx.methodSelector && (() => {
-                    const decoded = decodeCalldata(tx.input, tx.methodSelector)
-                    if (!decoded || decoded.params.length === 0) return null
-                    return (
-                      <div style={{
-                        marginBottom: 10, background: 'var(--surface2)',
-                        border: '1px solid var(--border)', borderRadius: 2, padding: '6px 10px',
-                      }}>
-                        {decoded.params.map((p, i) => (
-                          <div key={i} style={{ display: 'flex', gap: 6, alignItems: 'flex-start', marginBottom: 3 }}>
-                            <span style={{ color: 'var(--text3)', fontSize: 9, flexShrink: 0, paddingTop: 1, minWidth: 80 }}>{p.name}</span>
-                            <DecodedValueDisplay value={p.value} type={p.type} />
-                          </div>
-                        ))}
-                      </div>
-                    )
-                  })()}
-                  <details>
-                    <summary style={{ cursor: 'pointer', fontSize: 9, color: 'var(--text3)', marginBottom: 4, userSelect: 'none' }}>
-                      raw calldata
-                    </summary>
-                    <div style={{
-                      fontSize: 10, wordBreak: 'break-all', lineHeight: 2,
-                      fontFamily: 'var(--font-mono)',
-                      background: 'var(--surface2)',
-                      padding: '8px 10px',
-                      borderRadius: 2,
-                      border: '1px solid var(--border)',
-                    }}>
-                      <span style={{ color: 'var(--purple)' }}>{tx.input.slice(0, 10)}</span>
-                      {tx.input.slice(10).match(/.{1,64}/g)?.map((word, i) => (
-                        <span key={i} style={{ color: WORD_COLORS[i % WORD_COLORS.length] }}>{word}</span>
-                      ))}
-                    </div>
-                  </details>
+                  {tx.methodSelector && (
+                    <InputCalldataSection key={tx.hash} input={tx.input} selector={tx.methodSelector} />
+                  )}
                 </>
               )}
             </div>
@@ -570,7 +662,7 @@ export function TxView({ txHash, blockNumber }: { txHash: string; blockNumber: n
           {tx.input && tx.input !== '0x' && tx.methodSelector && (
             <section>
               <div className="panel-header">Call</div>
-              <DecodedCallView input={tx.input} selector={tx.methodSelector} />
+              <DecodedCallView key={tx.hash} input={tx.input} selector={tx.methodSelector} />
             </section>
           )}
 
