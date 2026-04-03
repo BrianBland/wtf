@@ -74,14 +74,17 @@ export const PROTOCOL_TYPE_COLORS: Record<string, string> = {
 }
 
 export const ACTION_COLORS: Record<string, string> = {
-  Swap:          '#00e5ff',
-  Supply:        '#69f0ae',
-  Withdraw:      '#ffab40',
-  Borrow:        '#ff7043',
-  Repay:         '#aed581',
-  Liquidation:   '#ff1744',
-  'Flash Loan':  '#e040fb',
-  Transfer:      '#90a4ae',
-  Wrap:          '#80cbc4',
-  Unwrap:        '#80cbc4',
+  Swap:            '#00e5ff',
+  Supply:          '#69f0ae',
+  Withdraw:        '#ffab40',
+  Borrow:          '#ff7043',
+  Repay:           '#aed581',
+  Liquidation:     '#ff1744',
+  'Flash Loan':    '#e040fb',
+  Transfer:        '#90a4ae',
+  Wrap:            '#80cbc4',
+  Unwrap:          '#80cbc4',
+  AddLiquidity:    '#00e676',
+  RemoveLiquidity: '#ff5252',
+  CollectFees:     '#ffd740',
 }

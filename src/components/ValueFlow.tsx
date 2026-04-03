@@ -2,6 +2,7 @@ import { useEffect } from 'react'
 import { TokenFlow, EthFlow, ProtocolEvent } from '../types'
 import { KNOWN_TOKENS } from '../lib/protocols'
 import { ACTION_COLORS } from '../lib/colorize'
+import { PROTOCOL_COLORS } from '../lib/protocols'
 import { formatAmount, formatEth, shortAddr } from '../lib/formatters'
 import { HexTag, TokenBadge } from './HexTag'
 import { useStore } from '../store'
@@ -134,7 +135,8 @@ export function ProtocolEventList({ events }: { events: ProtocolEvent[] }) {
   return (
     <div className="flow-table" style={{ gap: 4 }}>
       {events.map((ev, i) => {
-        const color  = ACTION_COLORS[ev.action] ?? 'var(--text2)'
+        const color      = ACTION_COLORS[ev.action]   ?? 'var(--text2)'
+        const protoColor = PROTOCOL_COLORS[ev.protocol] ?? 'var(--text2)'
         const token  = ev.token  ? resolveToken(ev.token,  tokenCache) : null
         const token2 = ev.token2 ? resolveToken(ev.token2, tokenCache) : null
 
@@ -177,7 +179,7 @@ export function ProtocolEventList({ events }: { events: ProtocolEvent[] }) {
           <div key={i} className="flex-center gap4 flow-row" style={{ flexWrap: 'wrap' }}>
             <span
               className="badge"
-              style={{ background: `${color}18`, color, border: `1px solid ${color}33` }}
+              style={{ background: `${protoColor}18`, color: protoColor, border: `1px solid ${protoColor}33` }}
             >
               {ev.protocol}
             </span>
