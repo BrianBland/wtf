@@ -30,6 +30,8 @@ export const FACTORY_PROTOCOLS: Record<string, string> = {
   '0xed8db60acc29e14bc867a497d94ca6e3ceb5ec04': 'Equalizer',
   // Hydrex
   '0x36077d39cdc65e1e3fb65810430e5b2c4d5fa29e': 'Hydrex',
+  // Algebra
+  '0xc5396866754799b9720125b104ae01d935ab9c7b': 'Algebra',
 }
 
 export interface PoolMeta {

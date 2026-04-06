@@ -9,6 +9,7 @@ export interface TokenInfo {
 export const KNOWN_TOKENS: Record<string, TokenInfo> = {
   '0x4200000000000000000000000000000000000006': { symbol: 'WETH',   decimals: 18, color: '#627eea' },
   '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913': { symbol: 'USDC',   decimals: 6,  color: '#2775ca' },
+  '0xfde4c96c8593536e31f229ea8f37b2ada2699bb2': { symbol: 'USDT',   decimals: 6,  color: '#26a17b' },
   '0xcbb7c0000ab88b473b1f5afd9ef808440eed33bf': { symbol: 'cbBTC',  decimals: 8,  color: '#f7931a' },
   '0x940181a94a35a4569e4529a3cdfb74e38fd98631': { symbol: 'AERO',   decimals: 18, color: '#00c4e0' },
   '0x50c5725949a6f0c72e6c4a641f24049a917db0cb': { symbol: 'DAI',    decimals: 18, color: '#f5ac37' },
@@ -84,8 +85,20 @@ export const KNOWN_PROTOCOLS: Record<string, ProtocolInfo> = {
   '0x4200000000000000000000000000000000000006': { name: 'WETH',                      type: 'token' },
   // Aggregators
   '0x1111111254eeb25477b68fb85ed929f73a960582': { name: '1inch Router',              type: 'dex' },
-  // Stargate
+  '0x6131b5fae19ea4f9d964eac0408e4408b66337b5': { name: 'KyberSwap Router',          type: 'dex' },
+  '0x6352a56caadc4f1e25cd6c75970fa768a3304e64': { name: 'OpenOcean Router',          type: 'dex' },
+  '0xdef1c0ded9bec7f1a1670819833240f027b25eff': { name: '0x Exchange Proxy',         type: 'dex' },
+  // Bridges — canonical + third-party
+  '0x4200000000000000000000000000000000000010': { name: 'Base Bridge',               type: 'bridge' },
+  '0x09aea4b2242abc8bb4bb78d537a67a245a7bec64': { name: 'Across SpokePool',          type: 'bridge' },
+  '0x27a16dc786820b16e5c9028b75b99f6f604b5d26': { name: 'Stargate V2',               type: 'bridge' },
+  // Stargate V1 (legacy)
   '0x45f1a95a4d3f3836523f5c83673c797f4d4d263b': { name: 'Stargate USDC Pool',        type: 'bridge' },
+  // Avantis (perps DEX)
+  '0x0c16ff40065cc3ab4bc55b60e447504afb9c7970': { name: 'Avantis Trading',           type: 'other' },
+  // Wasabi Protocol (options / perps)
+  '0xbdae5df498a45c5f058e3a09afe9ba4da7b248aa': { name: 'Wasabi Long Pool',          type: 'other' },
+  '0xa456c77d358c9c89f4dfb294fa2a47470b7da37c': { name: 'Wasabi Short Pool',         type: 'other' },
 }
 
 // Address sets for protocol routing disambiguation
@@ -125,8 +138,66 @@ export const COMPOUND3_ADDRESSES = new Set([
 ])
 
 export const USDC_ADDRESS  = '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913'
+export const USDT_ADDRESS  = '0xfde4c96c8593536e31f229ea8f37b2ada2699bb2'
 export const WETH_ADDRESS  = '0x4200000000000000000000000000000000000006'
 export const CBBTC_ADDRESS = '0xcbb7c0000ab88b473b1f5afd9ef808440eed33bf'
+
+// Avantis perps DEX — main trading/settlement contract
+export const AVANTIS_TRADING_ADDRESS = '0x0c16ff40065cc3ab4bc55b60e447504afb9c7970'
+
+// Wasabi Protocol options/perps pools
+export const WASABI_ADDRESSES = new Set([
+  '0xbdae5df498a45c5f058e3a09afe9ba4da7b248aa',  // Long Pool
+  '0xa456c77d358c9c89f4dfb294fa2a47470b7da37c',  // Short Pool
+])
+
+// KyberSwap MetaAggregation Router v2 — emits Swapped events from the router itself
+export const KYBERSWAP_ROUTER_ADDRESS  = '0x6131b5fae19ea4f9d964eac0408e4408b66337b5'
+export const OPENOCEAN_ROUTER_ADDRESS  = '0x6352a56caadc4f1e25cd6c75970fa768a3304e64'
+export const ZEROX_PROXY_ADDRESS       = '0xdef1c0ded9bec7f1a1670819833240f027b25eff'
+
+// Bridge contracts
+export const BASE_L2_BRIDGE_ADDRESS    = '0x4200000000000000000000000000000000000010'
+export const ACROSS_SPOKE_POOL_ADDRESS = '0x09aea4b2242abc8bb4bb78d537a67a245a7bec64'
+export const STARGATE_V2_USDC_ADDRESS  = '0x27a16dc786820b16e5c9028b75b99f6f604b5d26'
+
+// EVM chain ID → human-readable name (used by Across and canonical bridge)
+export const EVM_CHAIN_NAMES: Record<number, string> = {
+  1:       'Ethereum',
+  10:      'Optimism',
+  56:      'BNB Chain',
+  137:     'Polygon',
+  324:     'zkSync Era',
+  1101:    'Polygon zkEVM',
+  5000:    'Mantle',
+  8453:    'Base',
+  34443:   'Mode',
+  42161:   'Arbitrum',
+  43114:   'Avalanche',
+  59144:   'Linea',
+  534352:  'Scroll',
+  81457:   'Blast',
+}
+
+// LayerZero V2 endpoint ID → chain name (used by Stargate V2 OFT events)
+export const LZ_EID_NAMES: Record<number, string> = {
+  30101: 'Ethereum',
+  30102: 'BNB Chain',
+  30106: 'Avalanche',
+  30109: 'Polygon',
+  30110: 'Arbitrum',
+  30111: 'Optimism',
+  30125: 'Celo',
+  30165: 'zkSync Era',
+  30181: 'Mantle',
+  30183: 'Linea',
+  30184: 'Base',
+  30214: 'Scroll',
+  30217: 'Kava',
+  30260: 'Mode',
+  30272: 'Blast',
+  30326: 'Zircuit',
+}
 
 // 4-byte method selectors
 export const KNOWN_SELECTORS: Record<string, string> = {
@@ -177,7 +248,9 @@ export const KNOWN_SELECTORS: Record<string, string> = {
 export const TRANSFER_TOPIC   = '0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef'
 export const APPROVAL_TOPIC   = '0x8c5be1e5ebec7d5bd14f71427d1e84f3dd0314c0f7b2291e5b200ac8c7c3b925'
 // Uniswap V3 Swap(address,address,int256,int256,uint160,uint128,int24)
-export const UNI_V3_SWAP_TOPIC = '0xc42079f94a6350d7e6235f29174924f928cc2ac818eb64fed8004e115fbcca67'
+export const UNI_V3_SWAP_TOPIC    = '0xc42079f94a6350d7e6235f29174924f928cc2ac818eb64fed8004e115fbcca67'
+// PancakeSwap V3 Swap — same fields + uint128 protocolFeesToken0, uint128 protocolFeesToken1
+export const PANCAKE_V3_SWAP_TOPIC = '0x19b47279256b2a23a1665c810c8d55a1758940ee09377d4f8d26497a3577dc83'
 // Aerodrome / classic AMM Swap(address,uint,uint,uint,uint,address)
 export const AMM_SWAP_TOPIC   = '0xd78ad95fa46c994b6551d0da85fc275fe613ce37657fb8d5e3d130840159d822'
 // Aave V3 events
@@ -251,6 +324,48 @@ export const MORPHO_FLASH_LOAN_TOPIC   = '0xc76f1b4fe4396ac07a9fa55a415d4ca430e7
 // Balancer V2: FlashLoan(address indexed recipient, address indexed token, uint256 amount, uint256 feeAmount)
 export const BALANCER_FLASH_LOAN_TOPIC = '0x0d7d75e01ab95780d3cd1c8ec0dd6c2ce19e3a20427eec8bf53283b6fb8e95f0'
 
+// ── Bridge event topics ───────────────────────────────────────────────────
+// Base L2StandardBridge — canonical bridge (L2 side only)
+// ERC20BridgeFinalized(address indexed localToken, address indexed remoteToken, address indexed from, address to, uint256 amount, bytes extraData)
+export const L2_ERC20_BRIDGE_FINALIZED_TOPIC  = '0xd59c65b35445225835c83f50b6ede06a7be047d22e357073e250d9af537518cd'
+// ERC20BridgeInitiated(address indexed localToken, address indexed remoteToken, address indexed from, address to, uint256 amount, bytes extraData)
+export const L2_ERC20_BRIDGE_INITIATED_TOPIC  = '0x7ff126db8024424bbfd9826e8ab82ff59136289ea440b04b39a0df1b03b9cabf'
+// ETHBridgeFinalized(address indexed from, address indexed to, uint256 amount, bytes extraData)
+export const L2_ETH_BRIDGE_FINALIZED_TOPIC    = '0x31b2166ff604fc5672ea5df08a78081d2bc6d746cadce880747f3643d819e83d'
+// ETHBridgeInitiated(address indexed from, address indexed to, uint256 amount, bytes extraData)
+export const L2_ETH_BRIDGE_INITIATED_TOPIC    = '0x2849b43074093a05396b6f2a937dee8565b15a48a7b3d4bffb732a5017380af5'
+// DepositFinalized (legacy ERC20 bridge-in event, still emitted alongside ERC20BridgeFinalized)
+export const L2_DEPOSIT_FINALIZED_TOPIC       = '0xb0444523268717a02698be47d0803aa7468c00acbed2f8bd93a0459cde61dd89'
+// WithdrawalInitiated (legacy ERC20 bridge-out event)
+export const L2_WITHDRAWAL_INITIATED_TOPIC    = '0x73d170910aba9e6d50b102db522b1dbcd796216f5128b445aa2135272886497e'
+// Across SpokePool V2
+// FundsDeposited: topics[1]=destinationChainId, topics[3]=originToken, data[0]=amount
+export const ACROSS_FUNDS_DEPOSITED_TOPIC     = '0x32ed1a409ef04c7b0227189c3a103dc5ac10e775a15b785dcc510201f7c25ad3'
+// FilledRelay: topics[1]=originChainId, data[0]=amount
+export const ACROSS_FILLED_RELAY_TOPIC        = '0x44b559f101f8fbcc8a0ea43fa91a05a729a5ea6e14a7c75aa750374690137208'
+// Stargate V2 OFT (omnichain fungible token) events
+// OFTSent: topics[1]=guid, topics[2]=fromAddress; data[0]=dstEid, data[1]=amountSent, data[2]=amountReceived
+export const STARGATE_OFT_SENT_TOPIC          = '0x85496b760a4b7f8d66384b9df21b381f5d1b1e79f229a47aaf4c232edc2fe59a'
+// OFTReceived: topics[1]=guid, topics[2]=toAddress; data[0]=srcEid, data[1]=amountReceived
+export const STARGATE_OFT_RECEIVED_TOPIC      = '0xefed6d3500546b29533b128a29e3a94d70788727f0507505ac12eaf2e578fd9c'
+
+// Avantis perps — MarketExecuted and LimitExecuted from trading contract
+export const AVANTIS_MARKET_EXECUTED_TOPIC = '0x5c00d8b4c6c92b4922d1bd61ef722ec9a29169acb95d956676b07be6a6643eea'
+export const AVANTIS_LIMIT_EXECUTED_TOPIC  = '0xbf3d234454deff88435a11abb8501124ff9e6923fd2fdfc730d83474b6ffbe2c'
+// Wasabi Protocol position lifecycle events (both long and short pools)
+export const WASABI_POSITION_OPENED_TOPIC            = '0x41ae823bf4c91d7bece87d6eada54c198fd07594ad19d96d72d025896049bfdb'
+export const WASABI_POSITION_CLOSED_TOPIC            = '0x75b84e1e549840eae7725d388221efd1eff0445233ca8ba75c16fe9aa4420f9d'
+export const WASABI_POSITION_CLOSED_WITH_ORDER_TOPIC = '0x6fe8780cb281bfa04b1136759ae4474c3ada2c511162f19556f299187c63340a'
+export const WASABI_POSITION_LIQUIDATED_TOPIC        = '0xc84dd454965cb66936af89c78c1833d5dc2554cd53f6ef2ad1f7b0945a94c593'
+export const WASABI_POSITION_INCREASED_TOPIC         = '0xe80a6b78f88f08b92cac13fc3aa5b23cf4753f8fb8bd85e4b356b670634f77f7'
+export const WASABI_POSITION_DECREASED_TOPIC         = '0xbf109bd723f23a8453e35c569e9a1249639bca162cab600e8ac822cffeb84e55'
+// KyberSwap MetaAggregation Router v2 — Swapped(address,address,address,address,uint256,uint256)
+export const KYBERSWAP_SWAPPED_TOPIC  = '0xd6d4f5681c246c9f42c203e287975af1601f8df8035a9251f79aab5c8f09e2f8'
+// OpenOcean Exchange V2 — Swapped(address,address,address,address,uint256,uint256,uint256,uint256,uint256,address)
+export const OPENOCEAN_SWAPPED_TOPIC  = '0x76af224a143865a50b41496e1a73622698692c565c1214bc862f18e22d829c5e'
+// 0x Exchange Proxy — TransformedERC20(address indexed taker, address inputToken, address outputToken, uint256 inputTokenAmount, uint256 outputTokenAmount)
+export const ZEROX_TRANSFORMED_ERC20_TOPIC = '0x0f6672f78a59ba8e5e5b5d38df3ebc67f3c792e2c9259b8d97d7f00dd78ba1b3'
+
 // ── Protocol brand colors ─────────────────────────────────────────────────
 // Shared across Histogram, ProtocolDrillDown, and any other component that
 // needs to color-code protocol names consistently.
@@ -272,6 +387,7 @@ export const PROTOCOL_COLORS: Record<string, string> = {
   'Solidly V3':      '#e8a020',
   'Equalizer':       '#00c896',
   'Hydrex':          '#2ec4f0',
+  'Algebra':         '#6c3ce1',
   // DEX — other
   'Balancer V2':     '#aea8f5',
   // Lending
@@ -281,6 +397,17 @@ export const PROTOCOL_COLORS: Record<string, string> = {
   'Euler':           '#e040fb',
   'Compound V3':     '#00d395',
   'Moonwell':        '#7cfc00',
+  // Bridges
+  'Base Bridge':     '#003fd1',
+  'Across':          '#00d395',
+  'Stargate V2':     '#f3a217',
+  // Perps DEX
+  'Avantis':         '#ff4500',
+  'Wasabi':          '#9333ea',
+  // Aggregators
+  'KyberSwap':       '#31cb9e',
+  'OpenOcean':       '#00d0ef',
+  '0x Protocol':     '#231f20',
   // Fallback
   'Unknown':         '#555',
   'Unknown CL':      '#555',
@@ -297,6 +424,7 @@ export const KNOWN_TOPICS: Record<string, string> = {
   [TRANSFER_TOPIC]:                    'Transfer',
   [APPROVAL_TOPIC]:                    'Approval',
   [UNI_V3_SWAP_TOPIC]:                 'Swap (V3)',
+  [PANCAKE_V3_SWAP_TOPIC]:             'Swap (V3)',
   [AMM_SWAP_TOPIC]:                    'Swap (AMM)',
   [AAVE_SUPPLY_TOPIC]:                 'Supply',
   [AAVE_WITHDRAW_TOPIC]:               'Withdraw',
@@ -331,6 +459,27 @@ export const KNOWN_TOPICS: Record<string, string> = {
   [AAVE_FLASH_LOAN_TOPIC]:             'FlashLoan',
   [MORPHO_FLASH_LOAN_TOPIC]:           'FlashLoan',
   [BALANCER_FLASH_LOAN_TOPIC]:         'FlashLoan',
+  [L2_ERC20_BRIDGE_FINALIZED_TOPIC]:   'ERC20BridgeFinalized',
+  [L2_ERC20_BRIDGE_INITIATED_TOPIC]:   'ERC20BridgeInitiated',
+  [L2_ETH_BRIDGE_FINALIZED_TOPIC]:     'ETHBridgeFinalized',
+  [L2_ETH_BRIDGE_INITIATED_TOPIC]:     'ETHBridgeInitiated',
+  [L2_DEPOSIT_FINALIZED_TOPIC]:        'DepositFinalized',
+  [L2_WITHDRAWAL_INITIATED_TOPIC]:     'WithdrawalInitiated',
+  [ACROSS_FUNDS_DEPOSITED_TOPIC]:      'FundsDeposited',
+  [ACROSS_FILLED_RELAY_TOPIC]:         'FilledRelay',
+  [STARGATE_OFT_SENT_TOPIC]:           'OFTSent',
+  [STARGATE_OFT_RECEIVED_TOPIC]:       'OFTReceived',
+  [AVANTIS_MARKET_EXECUTED_TOPIC]:     'MarketExecuted',
+  [AVANTIS_LIMIT_EXECUTED_TOPIC]:      'LimitExecuted',
+  [WASABI_POSITION_OPENED_TOPIC]:            'PositionOpened',
+  [WASABI_POSITION_CLOSED_TOPIC]:            'PositionClosed',
+  [WASABI_POSITION_CLOSED_WITH_ORDER_TOPIC]: 'PositionClosedWithOrder',
+  [WASABI_POSITION_LIQUIDATED_TOPIC]:        'PositionLiquidated',
+  [WASABI_POSITION_INCREASED_TOPIC]:         'PositionIncreased',
+  [WASABI_POSITION_DECREASED_TOPIC]:         'PositionDecreased',
+  [KYBERSWAP_SWAPPED_TOPIC]:           'Swapped',
+  [OPENOCEAN_SWAPPED_TOPIC]:           'Swapped',
+  [ZEROX_TRANSFORMED_ERC20_TOPIC]:     'TransformedERC20',
 }
 
 export const PROTOCOL_CLASSIFICATION: Record<string, string> = {
@@ -344,6 +493,7 @@ export const PROTOCOL_CLASSIFICATION: Record<string, string> = {
   'Alien Base V3':   'Concentrated Liquidity',
   'Solidly V3':      'Concentrated Liquidity',
   'Hydrex':          'Concentrated Liquidity',
+  'Algebra':         'Concentrated Liquidity',
   // Classic AMM (constant-product / Solidly-style)
   'Uniswap V2':      'Classic AMM',
   'Aerodrome':       'Classic AMM',
@@ -360,4 +510,15 @@ export const PROTOCOL_CLASSIFICATION: Record<string, string> = {
   'Euler':           'Lending',
   'Compound V3':     'Lending',
   'Moonwell':        'Lending',
+  // Bridges
+  'Base Bridge':     'Bridge',
+  'Across':          'Bridge',
+  'Stargate V2':     'Bridge',
+  // Perps DEX
+  'Avantis':         'Perps DEX',
+  'Wasabi':          'Perps DEX',
+  // Aggregators
+  'KyberSwap':       'Aggregator',
+  'OpenOcean':       'Aggregator',
+  '0x Protocol':     'Aggregator',
 }

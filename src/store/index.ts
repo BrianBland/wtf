@@ -9,7 +9,7 @@ import {
 import { fetchTokenDetails, TokenDetails } from '../lib/tokenFetch'
 import { fetchPoolMeta, PoolMeta } from '../lib/poolFetch'
 import {
-  TRANSFER_TOPIC, UNI_V3_SWAP_TOPIC, AMM_SWAP_TOPIC,
+  TRANSFER_TOPIC, UNI_V3_SWAP_TOPIC, PANCAKE_V3_SWAP_TOPIC, AMM_SWAP_TOPIC,
   AAVE_SUPPLY_TOPIC, AAVE_WITHDRAW_TOPIC, AAVE_BORROW_TOPIC,
   AAVE_REPAY_TOPIC, AAVE_LIQUIDATION_TOPIC,
   COMPOUND_MINT_TOPIC, COMPOUND_REDEEM_TOPIC,
@@ -23,9 +23,23 @@ import {
   EULER_DEPOSIT_TOPIC, EULER_WITHDRAW_TOPIC, EULER_BORROW_TOPIC, EULER_REPAY_TOPIC,
   COMPOUND3_SUPPLY_TOPIC, COMPOUND3_WITHDRAW_TOPIC, COMPOUND3_ABSORB_TOPIC,
   AAVE_FLASH_LOAN_TOPIC, MORPHO_FLASH_LOAN_TOPIC, BALANCER_FLASH_LOAN_TOPIC,
+  AVANTIS_MARKET_EXECUTED_TOPIC, AVANTIS_LIMIT_EXECUTED_TOPIC,
+  WASABI_POSITION_OPENED_TOPIC, WASABI_POSITION_CLOSED_TOPIC,
+  WASABI_POSITION_CLOSED_WITH_ORDER_TOPIC, WASABI_POSITION_LIQUIDATED_TOPIC,
+  WASABI_POSITION_INCREASED_TOPIC, WASABI_POSITION_DECREASED_TOPIC,
+  KYBERSWAP_SWAPPED_TOPIC, OPENOCEAN_SWAPPED_TOPIC, ZEROX_TRANSFORMED_ERC20_TOPIC,
+  L2_ERC20_BRIDGE_FINALIZED_TOPIC, L2_ERC20_BRIDGE_INITIATED_TOPIC,
+  L2_ETH_BRIDGE_FINALIZED_TOPIC, L2_ETH_BRIDGE_INITIATED_TOPIC,
+  L2_DEPOSIT_FINALIZED_TOPIC, L2_WITHDRAWAL_INITIATED_TOPIC,
+  ACROSS_FUNDS_DEPOSITED_TOPIC, ACROSS_FILLED_RELAY_TOPIC,
+  STARGATE_OFT_SENT_TOPIC, STARGATE_OFT_RECEIVED_TOPIC,
   AERODROME_ADDRESSES, UNISWAP_V3_ADDRESSES,
   MORPHO_BLUE_ADDRESS, BALANCER_VAULT_ADDRESS,
   SEAMLESS_POOL_ADDRESS, AAVE_V3_POOL_ADDRESS, COMPOUND3_ADDRESSES,
+  AVANTIS_TRADING_ADDRESS, WASABI_ADDRESSES,
+  KYBERSWAP_ROUTER_ADDRESS, OPENOCEAN_ROUTER_ADDRESS, ZEROX_PROXY_ADDRESS,
+  BASE_L2_BRIDGE_ADDRESS, ACROSS_SPOKE_POOL_ADDRESS, STARGATE_V2_USDC_ADDRESS,
+  EVM_CHAIN_NAMES, LZ_EID_NAMES,
 } from '../lib/protocols'
 import {
   hexToBigInt, hexToNumber, getSelector,
@@ -59,7 +73,7 @@ async function fetchV3PoolProtocols(
   for (const log of rawLogs) {
     const t0 = log.topics[0]?.toLowerCase()
     // Include both V3-style and V2-style swap/LP pools — factory lookup disambiguates both
-    if (t0 === UNI_V3_SWAP_TOPIC || t0 === UNI_V3_POOL_MINT_TOPIC || t0 === UNI_V3_POOL_BURN_TOPIC || t0 === AMM_SWAP_TOPIC || t0 === AMM_BURN_TOPIC) {
+    if (t0 === UNI_V3_SWAP_TOPIC || t0 === PANCAKE_V3_SWAP_TOPIC || t0 === UNI_V3_POOL_MINT_TOPIC || t0 === UNI_V3_POOL_BURN_TOPIC || t0 === AMM_SWAP_TOPIC || t0 === AMM_BURN_TOPIC) {
       v3Pools.add(log.address.toLowerCase())
     }
     // V2 AMM AddLiquidity (COMPOUND_MINT_TOPIC with indexed sender = AMM pool, not cToken)
@@ -145,7 +159,8 @@ function processLogs(
     }
 
     // V3-style Swap — disambiguated by pool factory lookup; falls back to hint
-    if (t0 === UNI_V3_SWAP_TOPIC) {
+    // PancakeSwap V3 uses a different topic (two extra protocolFee fields) but same decoded fields
+    if (t0 === UNI_V3_SWAP_TOPIC || t0 === PANCAKE_V3_SWAP_TOPIC) {
       protocols.push({
         protocol: poolProto(log.address) ?? clProtocol, action: 'Swap',
         extra: {
@@ -296,6 +311,145 @@ function processLogs(
         protocols.push({ protocol: 'Compound V3', action: 'Withdraw', amount: decodeUint256(log.data, 0) })
       } else if (t0 === COMPOUND3_ABSORB_TOPIC) {
         protocols.push({ protocol: 'Compound V3', action: 'Liquidation', amount: decodeUint256(log.data, 0) })
+      }
+    }
+
+    // Avantis perps — MarketExecuted / LimitExecuted from the trading contract
+    if (log.address === AVANTIS_TRADING_ADDRESS) {
+      if (t0 === AVANTIS_MARKET_EXECUTED_TOPIC) {
+        protocols.push({ protocol: 'Avantis', action: 'Market Trade' })
+      } else if (t0 === AVANTIS_LIMIT_EXECUTED_TOPIC) {
+        protocols.push({ protocol: 'Avantis', action: 'Limit Order Fill' })
+      }
+    }
+
+    // Wasabi Protocol — position lifecycle events from long/short pools
+    if (WASABI_ADDRESSES.has(log.address)) {
+      if (t0 === WASABI_POSITION_OPENED_TOPIC) {
+        protocols.push({ protocol: 'Wasabi', action: 'Open Position' })
+      } else if (t0 === WASABI_POSITION_CLOSED_TOPIC || t0 === WASABI_POSITION_CLOSED_WITH_ORDER_TOPIC) {
+        protocols.push({ protocol: 'Wasabi', action: 'Close Position' })
+      } else if (t0 === WASABI_POSITION_LIQUIDATED_TOPIC) {
+        protocols.push({ protocol: 'Wasabi', action: 'Liquidation' })
+      } else if (t0 === WASABI_POSITION_INCREASED_TOPIC) {
+        protocols.push({ protocol: 'Wasabi', action: 'Increase Position' })
+      } else if (t0 === WASABI_POSITION_DECREASED_TOPIC) {
+        protocols.push({ protocol: 'Wasabi', action: 'Decrease Position' })
+      }
+    }
+
+    // KyberSwap MetaAggregation Router v2 — emits Swapped from the router itself
+    if (t0 === KYBERSWAP_SWAPPED_TOPIC && log.address === KYBERSWAP_ROUTER_ADDRESS) {
+      protocols.push({
+        protocol: 'KyberSwap', action: 'Swap',
+        token:  log.topics[2] ? topicToAddress(log.topics[2]) : undefined,
+        amount: decodeUint256(log.data, 0),
+      })
+    }
+
+    // OpenOcean Exchange V2
+    if (t0 === OPENOCEAN_SWAPPED_TOPIC && log.address === OPENOCEAN_ROUTER_ADDRESS) {
+      protocols.push({ protocol: 'OpenOcean', action: 'Swap' })
+    }
+
+    // 0x Exchange Proxy — TransformedERC20
+    if (t0 === ZEROX_TRANSFORMED_ERC20_TOPIC && log.address === ZEROX_PROXY_ADDRESS) {
+      protocols.push({ protocol: '0x Protocol', action: 'Swap' })
+    }
+
+    // ── Bridges ─────────────────────────────────────────────────────────────
+
+    // Base canonical bridge (L2StandardBridge)
+    // The canonical bridge always goes to/from Ethereum mainnet (chain 1).
+    if (log.address === BASE_L2_BRIDGE_ADDRESS) {
+      // ERC20 bridge IN (from Ethereum → Base): newer event
+      if (t0 === L2_ERC20_BRIDGE_FINALIZED_TOPIC) {
+        protocols.push({
+          protocol: 'Base Bridge', action: 'Bridge In',
+          token:  log.topics[1] ? topicToAddress(log.topics[1]) : undefined,
+          amount: decodeUint256(log.data, 1),  // data: to(addr), amount, extraData
+          extra:  { chain: 'Ethereum' },
+        })
+      } else if (t0 === L2_ERC20_BRIDGE_INITIATED_TOPIC) {
+        // ERC20 bridge OUT (Base → Ethereum): newer event
+        protocols.push({
+          protocol: 'Base Bridge', action: 'Bridge Out',
+          token:  log.topics[1] ? topicToAddress(log.topics[1]) : undefined,
+          amount: decodeUint256(log.data, 1),
+          extra:  { chain: 'Ethereum' },
+        })
+      } else if (t0 === L2_ETH_BRIDGE_FINALIZED_TOPIC) {
+        // ETH bridge IN (from Ethereum → Base)
+        protocols.push({
+          protocol: 'Base Bridge', action: 'Bridge In',
+          amount: decodeUint256(log.data, 0),
+          extra:  { chain: 'Ethereum' },
+        })
+      } else if (t0 === L2_ETH_BRIDGE_INITIATED_TOPIC) {
+        // ETH bridge OUT (Base → Ethereum)
+        protocols.push({
+          protocol: 'Base Bridge', action: 'Bridge Out',
+          amount: decodeUint256(log.data, 0),
+          extra:  { chain: 'Ethereum' },
+        })
+      } else if (t0 === L2_DEPOSIT_FINALIZED_TOPIC) {
+        // Legacy ERC20 bridge-in (still emitted for some tokens alongside ERC20BridgeFinalized)
+        protocols.push({
+          protocol: 'Base Bridge', action: 'Bridge In',
+          token:  log.topics[2] ? topicToAddress(log.topics[2]) : undefined,  // l2Token
+          amount: decodeUint256(log.data, 1),
+          extra:  { chain: 'Ethereum' },
+        })
+      } else if (t0 === L2_WITHDRAWAL_INITIATED_TOPIC) {
+        protocols.push({
+          protocol: 'Base Bridge', action: 'Bridge Out',
+          token:  log.topics[2] ? topicToAddress(log.topics[2]) : undefined,  // l2Token
+          amount: decodeUint256(log.data, 1),
+          extra:  { chain: 'Ethereum' },
+        })
+      }
+    }
+
+    // Across Protocol SpokePool
+    if (log.address === ACROSS_SPOKE_POOL_ADDRESS) {
+      if (t0 === ACROSS_FUNDS_DEPOSITED_TOPIC) {
+        // Bridge OUT: FundsDeposited; topics[1]=destChainId, topics[3]=originToken, data[0]=amount
+        const destId = log.topics[1] ? Number(hexToBigInt(log.topics[1])) : 0
+        protocols.push({
+          protocol: 'Across', action: 'Bridge Out',
+          token:  log.topics[3] ? topicToAddress(log.topics[3]) : undefined,
+          amount: decodeUint256(log.data, 0),
+          extra:  { chain: EVM_CHAIN_NAMES[destId] ?? `Chain ${destId}` },
+        })
+      } else if (t0 === ACROSS_FILLED_RELAY_TOPIC) {
+        // Bridge IN: FilledRelay; topics[1]=originChainId, data[0]=amount
+        const srcId = log.topics[1] ? Number(hexToBigInt(log.topics[1])) : 0
+        protocols.push({
+          protocol: 'Across', action: 'Bridge In',
+          amount: decodeUint256(log.data, 0),
+          extra:  { chain: EVM_CHAIN_NAMES[srcId] ?? `Chain ${srcId}` },
+        })
+      }
+    }
+
+    // Stargate V2 USDC pool (OFT — omnichain fungible token)
+    if (log.address === STARGATE_V2_USDC_ADDRESS) {
+      if (t0 === STARGATE_OFT_SENT_TOPIC) {
+        // Bridge OUT: OFTSent; data[0]=dstEid(uint32), data[1]=amountSent, data[2]=amountReceived
+        const dstEid = Number(decodeUint256(log.data, 0))
+        protocols.push({
+          protocol: 'Stargate V2', action: 'Bridge Out',
+          amount: decodeUint256(log.data, 1),
+          extra:  { chain: LZ_EID_NAMES[dstEid] ?? `EID ${dstEid}` },
+        })
+      } else if (t0 === STARGATE_OFT_RECEIVED_TOPIC) {
+        // Bridge IN: OFTReceived; data[0]=srcEid(uint32), data[1]=amountReceived
+        const srcEid = Number(decodeUint256(log.data, 0))
+        protocols.push({
+          protocol: 'Stargate V2', action: 'Bridge In',
+          amount: decodeUint256(log.data, 1),
+          extra:  { chain: LZ_EID_NAMES[srcEid] ?? `EID ${srcEid}` },
+        })
       }
     }
 

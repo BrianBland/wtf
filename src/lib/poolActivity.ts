@@ -1,5 +1,5 @@
 import { Block, TokenFlow } from '../types'
-import { USDC_ADDRESS, WETH_ADDRESS } from './protocols'
+import { USDC_ADDRESS, WETH_ADDRESS, USDT_ADDRESS } from './protocols'
 
 export interface PoolSummary {
   pool:           string
@@ -34,6 +34,7 @@ export function buildPoolActivity(blocks: Block[]): Map<string, PoolSummary> {
   for (const block of blocks) {
     for (const tx of block.transactions) {
       const usdcVol = grossTokenVolume(tx.tokenFlows, USDC_ADDRESS)
+                    + grossTokenVolume(tx.tokenFlows, USDT_ADDRESS)
       const wethVol = grossTokenVolume(tx.tokenFlows, WETH_ADDRESS)
       const credited = new Set<string>()
 
