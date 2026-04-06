@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import {
-  Block, Transaction, Log, TokenFlow, ProtocolEvent,
+  Block, Transaction, UserOp, Log, TokenFlow, ProtocolEvent,
   CallTrace, NavState, RawBlock, RawLog, RawReceipt,
 } from '../types'
 import {
@@ -9,7 +9,7 @@ import {
 import { fetchTokenDetails, TokenDetails } from '../lib/tokenFetch'
 import { fetchPoolMeta, PoolMeta } from '../lib/poolFetch'
 import {
-  TRANSFER_TOPIC, UNI_V3_SWAP_TOPIC, PANCAKE_V3_SWAP_TOPIC, AMM_SWAP_TOPIC,
+  TRANSFER_TOPIC, UNI_V3_SWAP_TOPIC, PANCAKE_V3_SWAP_TOPIC, AMM_SWAP_TOPIC, AERODROME_AMM_SWAP_TOPIC,
   AAVE_SUPPLY_TOPIC, AAVE_WITHDRAW_TOPIC, AAVE_BORROW_TOPIC,
   AAVE_REPAY_TOPIC, AAVE_LIQUIDATION_TOPIC,
   COMPOUND_MINT_TOPIC, COMPOUND_REDEEM_TOPIC,
@@ -38,6 +38,7 @@ import {
   CCTP_DOMAIN_NAMES,
   CCIP_SEND_REQUESTED_TOPIC, CCIP_EXECUTION_STATE_CHANGED_TOPIC,
   CCIP_ONRAMP_CHAINS, CCIP_OFFRAMP_CHAINS,
+  USER_OPERATION_EVENT_TOPIC,
   AERODROME_ADDRESSES, UNISWAP_V3_ADDRESSES,
   MORPHO_BLUE_ADDRESS, BALANCER_VAULT_ADDRESS,
   SEAMLESS_POOL_ADDRESS, AAVE_V3_POOL_ADDRESS, COMPOUND3_ADDRESSES,
@@ -50,6 +51,7 @@ import {
   hexToBigInt, hexToNumber, getSelector,
   topicToAddress, decodeUint256, decodeInt256,
 } from '../lib/formatters'
+import { decodeCalldata, DecodedValue } from '../lib/calldataDecoder'
 import { RpcClient } from '../lib/rpc'
 import { estimateElasticity } from '../lib/chainParams'
 
@@ -78,7 +80,7 @@ async function fetchV3PoolProtocols(
   for (const log of rawLogs) {
     const t0 = log.topics[0]?.toLowerCase()
     // Include both V3-style and V2-style swap/LP pools — factory lookup disambiguates both
-    if (t0 === UNI_V3_SWAP_TOPIC || t0 === PANCAKE_V3_SWAP_TOPIC || t0 === UNI_V3_POOL_MINT_TOPIC || t0 === UNI_V3_POOL_BURN_TOPIC || t0 === AMM_SWAP_TOPIC || t0 === AMM_BURN_TOPIC) {
+    if (t0 === UNI_V3_SWAP_TOPIC || t0 === PANCAKE_V3_SWAP_TOPIC || t0 === UNI_V3_POOL_MINT_TOPIC || t0 === UNI_V3_POOL_BURN_TOPIC || t0 === AMM_SWAP_TOPIC || t0 === AERODROME_AMM_SWAP_TOPIC || t0 === AMM_BURN_TOPIC) {
       v3Pools.add(log.address.toLowerCase())
     }
     // V2 AMM AddLiquidity (COMPOUND_MINT_TOPIC with indexed sender = AMM pool, not cToken)
@@ -177,8 +179,9 @@ function processLogs(
     }
 
     // V2-style AMM Swap — factory lookup disambiguates (Aerodrome, PancakeSwap V2, SushiSwap V2, etc.)
-    // Swap(address indexed sender, uint256 amount0In, uint256 amount1In, uint256 amount0Out, uint256 amount1Out, address indexed to)
-    if (t0 === AMM_SWAP_TOPIC) {
+    // Standard: Swap(address indexed sender, uint,uint,uint,uint, address indexed to)
+    // Aerodrome V2: Swap(address indexed sender, address indexed to, uint,uint,uint,uint) — same data layout
+    if (t0 === AMM_SWAP_TOPIC || t0 === AERODROME_AMM_SWAP_TOPIC) {
       protocols.push({
         protocol: poolProto(log.address) ?? ammProtocol, action: 'Swap',
         extra: {
@@ -643,7 +646,92 @@ function processLogs(
     }
   }
 
+  // Post-pass: annotate V4 Swap events with token in/out resolved from PoolManager flows.
+  // V4 uses bytes32 pool IDs (not contract addresses), so we can't call token0()/token1().
+  // Instead we match the signed amount0/amount1 from the Swap event to ERC-20 transfers
+  // flowing to/from the PoolManager. Positive amount = into pool = user sold (tokenIn).
+  const hasV4Swaps = protocols.some(ev => ev.protocol === 'Uniswap V4' && ev.action === 'Swap')
+  if (hasV4Swaps) {
+    const pmAddr = UNI_V4_POOL_MANAGER_ADDRESS
+    const pmIn  = tokenFlows.filter(f => f.to   === pmAddr)
+    const pmOut = tokenFlows.filter(f => f.from === pmAddr)
+    for (const ev of protocols) {
+      if (ev.protocol !== 'Uniswap V4' || ev.action !== 'Swap' || !ev.extra) continue
+      const a0 = BigInt(ev.extra.amount0 as string)
+      const a1 = BigInt(ev.extra.amount1 as string)
+      // Positive amount = tokens flowed into pool (user sold); negative = flowed out (user received)
+      let inFlow, outFlow
+      if (a0 > 0n) {
+        inFlow  = pmIn.find(f => f.amount === a0)   ?? pmIn[0]
+        outFlow = pmOut.find(f => f.amount === -a1)  ?? pmOut[0]
+      } else {
+        inFlow  = pmIn.find(f => f.amount === a1)   ?? pmIn[0]
+        outFlow = pmOut.find(f => f.amount === -a0)  ?? pmOut[0]
+      }
+      if (inFlow)  { ev.extra.tokenIn  = inFlow.token;  ev.extra.amountIn  = inFlow.amount.toString() }
+      if (outFlow) { ev.extra.tokenOut = outFlow.token; ev.extra.amountOut = outFlow.amount.toString() }
+    }
+  }
+
   return { tokenFlows, protocols }
+}
+
+// ── ERC-4337 UserOp extraction ───────────────────────────────────────────────
+
+const HANDLEOPS_SELECTORS = new Set(['0x1fad948c', '0x765e827f'])
+
+function extractUserOps(
+  logs: Log[],
+  input: string,
+  selector: string,
+  poolProtocols: Map<string, string>,
+): UserOp[] | undefined {
+  if (!HANDLEOPS_SELECTORS.has(selector)) return undefined
+
+  // Find positions of UserOperationEvent logs — one per UserOp, in execution order.
+  const uoeIndices: number[] = []
+  for (let i = 0; i < logs.length; i++) {
+    if (logs[i].topics[0] === USER_OPERATION_EVENT_TOPIC) uoeIndices.push(i)
+  }
+  if (uoeIndices.length === 0) return undefined
+
+  // Slice logs between consecutive UserOperationEvents.
+  // Logs[prev..uoeIndex[i]) are the app logs emitted by UserOp i.
+  const logSlices: Log[][] = []
+  let prev = 0
+  for (const idx of uoeIndices) {
+    logSlices.push(logs.slice(prev, idx))
+    prev = idx + 1
+  }
+
+  // Decode handleOps calldata to get per-op callData fields.
+  // ops param is params[0], a tuple[] — each element has fields indexed by name.
+  const decoded = decodeCalldata(input, selector)
+  const opsValue = decoded?.params[0]?.value
+  const opElements: DecodedValue[] = opsValue?.kind === 'array' ? opsValue.elements : []
+
+  return uoeIndices.map((uoeIdx, i) => {
+    const uoeLog = logs[uoeIdx]
+    // Indexed fields: topics[1]=userOpHash, topics[2]=sender, topics[3]=paymaster
+    const sender = uoeLog.topics[2] ? topicToAddress(uoeLog.topics[2]) : '0x'
+    // Non-indexed data: nonce (uint256), success (bool as uint256), actualGasCost, actualGasUsed
+    const nonce         = decodeUint256(uoeLog.data, 0)
+    const success       = decodeUint256(uoeLog.data, 1) !== 0n
+    const actualGasUsed = decodeUint256(uoeLog.data, 3)
+
+    // Extract callData from decoded tuple element (same field index for both v0.6 and v0.7)
+    let callData = ''
+    const opElem = opElements[i]
+    if (opElem?.kind === 'tuple') {
+      const cdField = opElem.fields.find((f) => f.name === 'callData')
+      if (cdField?.value.kind === 'bytes') callData = cdField.value.hex
+    }
+
+    const logSlice = logSlices[i] ?? []
+    const { tokenFlows, protocols } = processLogs(logSlice, null, poolProtocols)
+
+    return { index: i, sender, nonce, callData, success, actualGasUsed, tokenFlows, protocols, logs: logSlice }
+  })
 }
 
 // ── Block processing ─────────────────────────────────────────────────────────
@@ -672,10 +760,13 @@ function processBlock(
     logsByTx.get(hash)!.push(rawLogToLog(rl))
   }
 
-  const gasUsedByTx = new Map<string, bigint>()
+  const gasUsedByTx   = new Map<string, bigint>()
+  const revertedTxSet = new Set<string>()
   if (rawReceipts) {
     for (const r of rawReceipts) {
-      gasUsedByTx.set(r.transactionHash.toLowerCase(), hexToBigInt(r.gasUsed))
+      const txHash = r.transactionHash.toLowerCase()
+      gasUsedByTx.set(txHash, hexToBigInt(r.gasUsed))
+      if (r.status === '0x0') revertedTxSet.add(txHash)
     }
   }
 
@@ -694,6 +785,7 @@ function processBlock(
       ? hexToBigInt(rawTx.gasPrice)
       : undefined
 
+    const methodSelector = getSelector(rawTx.input)
     return {
       hash,
       blockNumber:    hexToNumber(rawTx.blockNumber),
@@ -706,13 +798,17 @@ function processBlock(
       gasPrice,
       maxPriorityFeePerGas,
       input:          rawTx.input,
-      methodSelector: getSelector(rawTx.input),
+      methodSelector,
       logs,
       tokenFlows,
       ethFlows:       value > 0n
         ? [{ from: rawTx.from.toLowerCase(), to: rawTx.to?.toLowerCase() ?? '0x', value, type: 'tx' as const }]
         : [],
       protocols,
+      reverted: revertedTxSet.has(hash) || undefined,
+      userOps: methodSelector
+        ? extractUserOps(logs, rawTx.input, methodSelector, poolProtocols)
+        : undefined,
     }
   })
 

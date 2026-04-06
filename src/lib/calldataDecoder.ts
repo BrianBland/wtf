@@ -235,6 +235,40 @@ const ABI_MAP: Record<string, AbiFn> = {
     { name: 's',         type: 'bytes32' },
   ]},
 
+  // ERC-4337 EntryPoint v0.6 — UserOperation
+  '0x1fad948c': { name: 'handleOps', inputs: [
+    { name: 'ops', type: 'tuple[]', components: [
+      { name: 'sender',               type: 'address' },
+      { name: 'nonce',                type: 'uint256' },
+      { name: 'initCode',             type: 'bytes'   },
+      { name: 'callData',             type: 'bytes'   },
+      { name: 'callGasLimit',         type: 'uint256' },
+      { name: 'verificationGasLimit', type: 'uint256' },
+      { name: 'preVerificationGas',   type: 'uint256' },
+      { name: 'maxFeePerGas',         type: 'uint256' },
+      { name: 'maxPriorityFeePerGas', type: 'uint256' },
+      { name: 'paymasterAndData',     type: 'bytes'   },
+      { name: 'signature',            type: 'bytes'   },
+    ]},
+    { name: 'beneficiary', type: 'address' },
+  ]},
+
+  // ERC-4337 EntryPoint v0.7 — PackedUserOperation
+  '0x765e827f': { name: 'handleOps', inputs: [
+    { name: 'ops', type: 'tuple[]', components: [
+      { name: 'sender',           type: 'address' },
+      { name: 'nonce',            type: 'uint256' },
+      { name: 'initCode',         type: 'bytes'   },
+      { name: 'callData',         type: 'bytes'   },
+      { name: 'accountGasLimits', type: 'bytes32' }, // verificationGasLimit (upper 16) | callGasLimit (lower 16)
+      { name: 'preVerificationGas', type: 'uint256' },
+      { name: 'gasFees',          type: 'bytes32' }, // maxPriorityFeePerGas (upper 16) | maxFeePerGas (lower 16)
+      { name: 'paymasterAndData', type: 'bytes'   },
+      { name: 'signature',        type: 'bytes'   },
+    ]},
+    { name: 'beneficiary', type: 'address' },
+  ]},
+
   // Gnosis Safe
   '0x6a761202': { name: 'execTransaction', inputs: [
     { name: 'to',             type: 'address' },
@@ -441,6 +475,9 @@ export function decodeCalldataFromSig(input: string, sig: string): DecodedCall |
     const totalHead = inputs.reduce((sum, inp) => sum + headSize(inp.type, inp.components), 0)
     if (data.length < totalHead) return null
 
+    // Reject zero-param signatures with trailing calldata — almost certainly a selector collision.
+    if (inputs.length === 0 && data.length > 0) return null
+
     // Reject if any dynamic offset pointer is out of range.
     // Valid offsets must point past the head area (>= totalHead) and within data.
     let headOff = 0
@@ -488,6 +525,12 @@ export function decodeCalldata(input: string, selector: string): DecodedCall | n
 
 export { ABI_MAP }
 
+/** Returns true if the text signature is plausibly compatible with the given calldata.
+ *  Used to filter out selector-collision false positives from 4byte.directory. */
+export function sigMatchesCalldata(sig: string, inputHex: string): boolean {
+  return decodeCalldataFromSig(inputHex, sig) !== null
+}
+
 // ── Event types ────────────────────────────────────────────────────────────
 
 export interface AbiEventInput extends AbiInput {
@@ -507,6 +550,15 @@ export interface DecodedLog {
 // ── Known event ABIs (keyed by topic0 hash) ────────────────────────────────
 
 export const EVENT_ABI_MAP: Record<string, AbiEvent> = {
+  // WETH wrap/unwrap
+  '0xe1fffcc4923d04b559f4d29a8bfc6cda04eb5b0d3c460751c2402c5c5cc9109c': { name: 'Deposit', inputs: [
+    { name: 'dst', type: 'address', indexed: true  },
+    { name: 'wad', type: 'uint256', indexed: false },
+  ]},
+  '0x7fcf532c15f0a6db0bd6d0e038bea71d30d808c7d98cb3bf7268a95bf5081b65': { name: 'Withdrawal', inputs: [
+    { name: 'src', type: 'address', indexed: true  },
+    { name: 'wad', type: 'uint256', indexed: false },
+  ]},
   // ERC20
   '0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef': { name: 'Transfer', inputs: [
     { name: 'from',  type: 'address', indexed: true  },

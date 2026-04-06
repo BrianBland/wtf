@@ -1,6 +1,6 @@
 import { useMemo, useState, useRef, useEffect } from 'react'
 import { useStore } from '../store'
-import { Block, Transaction, TokenFlow } from '../types'
+import { Block, Transaction, TokenFlow, UserOp } from '../types'
 import { BlockStateAccessView } from './BlockStateAccessView'
 import { buildHistograms } from '../lib/aggregations'
 import { SortKey } from './Histogram'
@@ -25,18 +25,27 @@ import { computeParallelization, aggregateKeys } from '../lib/stateAccess'
 // ── DeFi action glyphs ────────────────────────────────────────────────────
 
 const ACTION_GLYPH: Record<string, string> = {
-  'Swap':             '⇄',
-  'Supply':           '↑',
-  'Withdraw':         '↓',
-  'Borrow':           '⤓',
-  'Repay':            '⤒',
-  'AddLiquidity':     '▲',
-  'RemoveLiquidity':  '▽',
-  'Liquidation':      '⚡',
-  'Flash Loan':       '↯',
-  'Transfer':         '→',
-  'Wrap':             '⊕',
-  'Unwrap':           '⊖',
+  'Swap':              '⇄',
+  'Supply':            '↑',
+  'Withdraw':          '↓',
+  'Borrow':            '⤓',
+  'Repay':             '⤒',
+  'AddLiquidity':      '▲',
+  'RemoveLiquidity':   '▽',
+  'CollectFees':       '◎',
+  'Liquidation':       '⚡',
+  'Flash Loan':        '↯',
+  'Transfer':          '→',
+  'Wrap':              '⊕',
+  'Unwrap':            '⊖',
+  'Bridge In':         '⤵',
+  'Bridge Out':        '⤴',
+  'Market Trade':      '◈',
+  'Limit Order Fill':  '◆',
+  'Open Position':     '▶',
+  'Close Position':    '◀',
+  'Increase Position': '△',
+  'Decrease Position': '▿',
 }
 
 function defiSummary(protocols: { action: string }[]): string {
@@ -274,6 +283,8 @@ function TxRow({ tx, baseFee, selected, onClick }: { tx: Transaction; baseFee: b
   const hasDefi   = tx.protocols.length > 0
   const gasUsed   = tx.gasUsed ?? tx.gas
   const tip       = effectivePriorityFee(tx, baseFee)
+  const reverted  = tx.reverted === true
+  const dimStyle  = reverted ? { opacity: 0.6 } : undefined
 
   return (
     <div className={`data-row ${selected ? 'selected' : ''}`} onClick={onClick}>
@@ -282,11 +293,13 @@ function TxRow({ tx, baseFee, selected, onClick }: { tx: Transaction; baseFee: b
         {tx.index}
       </span>
 
-      {/* Hash */}
-      <span style={{ color: 'var(--text2)', fontSize: 10, minWidth: 90, flexShrink: 0 }}>{shortHash(tx.hash)}</span>
+      {/* Hash — red for reverted */}
+      <span style={{ color: reverted ? 'var(--red)' : 'var(--text2)', fontSize: 10, minWidth: 90, flexShrink: 0 }}>
+        {shortHash(tx.hash)}
+      </span>
 
       {/* From → To · method */}
-      <div className="flex-center gap4" style={{ flex: 1, overflow: 'hidden', minWidth: 0 }}>
+      <div className="flex-center gap4" style={{ flex: 1, overflow: 'hidden', minWidth: 0, ...dimStyle }}>
         <HexTag value={tx.from} type="address" />
         <ExplorerLink hash={tx.from} type="address" />
         <span className="flow-arrow" style={{ flexShrink: 0 }}>→</span>
@@ -294,26 +307,26 @@ function TxRow({ tx, baseFee, selected, onClick }: { tx: Transaction; baseFee: b
           ? <><HexTag value={tx.to} type="address" /><ExplorerLink hash={tx.to} type="address" /></>
           : <span className="badge muted">deploy</span>}
         <span className="muted" style={{ fontSize: 9, flexShrink: 0 }}>·</span>
-        <SelectorTag selector={tx.methodSelector} />
+        <SelectorTag selector={tx.methodSelector} inputHex={tx.input} />
       </div>
 
       {/* Token assets */}
-      <div className="flex-center gap4" style={{ width: 200, justifyContent: 'flex-end', flexShrink: 0, overflow: 'hidden' }}>
+      <div className="flex-center gap4" style={{ width: 200, justifyContent: 'flex-end', flexShrink: 0, overflow: 'hidden', ...dimStyle }}>
         {hasTokens ? <TokenFlowBadges tokenFlows={tx.tokenFlows} /> : <span className="muted" style={{ fontSize: 10 }}>—</span>}
       </div>
 
       {/* DeFi actions */}
-      <div className="flex-center gap4" style={{ width: 70, justifyContent: 'flex-end', flexShrink: 0, overflow: 'hidden' }}>
+      <div className="flex-center gap4" style={{ width: 70, justifyContent: 'flex-end', flexShrink: 0, overflow: 'hidden', ...dimStyle }}>
         {hasDefi ? <span className="badge purple">{defiSummary(tx.protocols)}</span> : <span className="muted" style={{ fontSize: 10 }}>—</span>}
       </div>
 
       {/* ETH value */}
-      <div className="flex-center gap4" style={{ width: 90, justifyContent: 'flex-end', flexShrink: 0, overflow: 'hidden' }}>
+      <div className="flex-center gap4" style={{ width: 90, justifyContent: 'flex-end', flexShrink: 0, overflow: 'hidden', ...dimStyle }}>
         {hasEth ? <span className="badge amber">{formatEthAuto(tx.value)}</span> : <span className="muted" style={{ fontSize: 10 }}>—</span>}
       </div>
 
       {/* Gas + fee — fixed width, always at right edge */}
-      <div style={{ width: 96, textAlign: 'right', flexShrink: 0, fontVariantNumeric: 'tabular-nums', lineHeight: 1.3 }}>
+      <div style={{ width: 96, textAlign: 'right', flexShrink: 0, fontVariantNumeric: 'tabular-nums', lineHeight: 1.3, ...dimStyle }}>
         <div style={{ fontSize: 10, color: 'var(--text2)' }}>
           {formatGas(gasUsed)}<span style={{ color: 'var(--text3)' }}>/{formatGas(tx.gas)}</span>
         </div>
@@ -322,6 +335,67 @@ function TxRow({ tx, baseFee, selected, onClick }: { tx: Transaction; baseFee: b
 
       {/* Tx explorer link — appears on row hover, far right */}
       <ExplorerLink hash={tx.hash} type="tx" />
+    </div>
+  )
+}
+
+// ── UserOp sub-row ────────────────────────────────────────────────────────
+
+function UserOpRow({ tx, userOp, selected, onClick }: {
+  tx: Transaction; userOp: UserOp; selected: boolean; onClick: () => void
+}) {
+  const hasTokens    = userOp.tokenFlows.length > 0
+  const hasDefi      = userOp.protocols.length > 0
+  const callSelector = userOp.callData.length >= 10 ? userOp.callData.slice(0, 10).toLowerCase() : null
+
+  return (
+    <div
+      className={`data-row ${selected ? 'selected' : ''}`}
+      onClick={onClick}
+      style={{ paddingLeft: 20, opacity: userOp.success ? 1 : 0.6, borderTop: '1px solid var(--border)' }}
+    >
+      {/* Sub-index */}
+      <span style={{ color: 'var(--text3)', minWidth: 30, fontSize: 10, fontVariantNumeric: 'tabular-nums', flexShrink: 0 }}>
+        {tx.index}<span style={{ opacity: 0.5 }}>.{userOp.index + 1}</span>
+      </span>
+
+      {/* Success / no hash */}
+      <span style={{ fontSize: 10, minWidth: 90, flexShrink: 0, color: userOp.success ? 'var(--text3)' : 'var(--red)' }}>
+        {userOp.success ? '' : '✗ reverted'}
+      </span>
+
+      {/* Sender + inner method */}
+      <div className="flex-center gap4" style={{ flex: 1, overflow: 'hidden', minWidth: 0 }}>
+        <span className="muted" style={{ fontSize: 9, flexShrink: 0 }}>↳</span>
+        <HexTag value={userOp.sender} type="address" />
+        <span className="muted" style={{ fontSize: 9, flexShrink: 0 }}>·</span>
+        <SelectorTag selector={callSelector} inputHex={userOp.callData} />
+      </div>
+
+      {/* Token assets */}
+      <div className="flex-center gap4" style={{ width: 200, justifyContent: 'flex-end', flexShrink: 0, overflow: 'hidden' }}>
+        {hasTokens
+          ? <TokenFlowBadges tokenFlows={userOp.tokenFlows} />
+          : <span className="muted" style={{ fontSize: 10 }}>—</span>}
+      </div>
+
+      {/* DeFi actions */}
+      <div className="flex-center gap4" style={{ width: 70, justifyContent: 'flex-end', flexShrink: 0, overflow: 'hidden' }}>
+        {hasDefi
+          ? <span className="badge purple">{defiSummary(userOp.protocols)}</span>
+          : <span className="muted" style={{ fontSize: 10 }}>—</span>}
+      </div>
+
+      {/* ETH value — not applicable for UserOps */}
+      <div style={{ width: 90, flexShrink: 0 }} />
+
+      {/* Gas used */}
+      <div style={{ width: 96, textAlign: 'right', flexShrink: 0, fontVariantNumeric: 'tabular-nums' }}>
+        <div style={{ fontSize: 9, color: 'var(--text3)' }}>{formatGas(userOp.actualGasUsed)}</div>
+      </div>
+
+      {/* Spacer to match TxRow's ExplorerLink */}
+      <div style={{ width: 16, flexShrink: 0 }} />
     </div>
   )
 }
@@ -376,11 +450,40 @@ function TxQuickDetail({ tx, blockNumber }: { tx: Transaction; blockNumber: numb
           </section>
         )}
 
+        {/* User operations breakdown (AA bundles) */}
+        {tx.userOps && tx.userOps.length > 0 && (
+          <section>
+            <div className="panel-header" style={{ fontSize: 10 }}>User Operations ({tx.userOps.length})</div>
+            {tx.userOps.map((op) => (
+              <div key={op.index} style={{ borderBottom: '1px solid var(--border)', padding: '6px 10px' }}>
+                <div className="flex-center gap4" style={{ marginBottom: 4, flexWrap: 'wrap' }}>
+                  <span className="muted" style={{ fontSize: 9, minWidth: 20 }}>op {op.index + 1}</span>
+                  <HexTag value={op.sender} type="address" />
+                  {!op.success && <span style={{ color: 'var(--red)', fontSize: 9 }}>✗ reverted</span>}
+                  {op.callData.length >= 10 && (
+                    <SelectorTag selector={op.callData.slice(0, 10)} inputHex={op.callData} />
+                  )}
+                  <span className="muted" style={{ fontSize: 9, marginLeft: 'auto' }}>{formatGas(op.actualGasUsed)} gas</span>
+                </div>
+                {op.protocols.length > 0 && (
+                  <ProtocolEventList events={op.protocols} tokenFlows={op.tokenFlows} />
+                )}
+                {op.tokenFlows.length > 0 && (
+                  <TokenFlowList flows={op.tokenFlows} />
+                )}
+                {op.protocols.length === 0 && op.tokenFlows.length === 0 && (
+                  <span className="muted" style={{ fontSize: 9 }}>no value flows</span>
+                )}
+              </div>
+            ))}
+          </section>
+        )}
+
         {/* Protocol events */}
         {tx.protocols.length > 0 && (
           <section>
             <div className="panel-header" style={{ fontSize: 10 }}>Protocol Activity</div>
-            <ProtocolEventList events={tx.protocols} />
+            <ProtocolEventList events={tx.protocols} tokenFlows={tx.tokenFlows} />
           </section>
         )}
 
@@ -1037,6 +1140,15 @@ export function BlockView({ blockNumber }: { blockNumber: number }) {
                 selected={tx.hash === selectedTx}
                 onClick={() => setSelectedTx(tx.hash === selectedTx ? null : tx.hash)}
               />
+              {tx.userOps?.map((op) => (
+                <UserOpRow
+                  key={op.index}
+                  tx={tx}
+                  userOp={op}
+                  selected={tx.hash === selectedTx}
+                  onClick={() => setSelectedTx(tx.hash === selectedTx ? null : tx.hash)}
+                />
+              ))}
             </div>
           ))}
           {filteredTxs.length === 0 && <div className="empty-state">No txs match filter</div>}

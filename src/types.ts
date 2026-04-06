@@ -74,6 +74,21 @@ export interface Transaction {
   tokenFlows: TokenFlow[]
   ethFlows: EthFlow[]
   protocols: ProtocolEvent[]
+  reverted?: boolean             // true when receipt status is 0x0
+  userOps?: UserOp[]             // populated for ERC-4337 handleOps txs
+}
+
+// A single UserOperation extracted from an ERC-4337 handleOps bundle
+export interface UserOp {
+  index:         number          // 0-based position within the bundle
+  sender:        string          // smart account address (from UserOperationEvent)
+  nonce:         bigint          // from UserOperationEvent data
+  callData:      string          // inner calldata hex (from decoded handleOps input)
+  success:       boolean         // from UserOperationEvent
+  actualGasUsed: bigint          // from UserOperationEvent
+  tokenFlows:    TokenFlow[]     // ERC-20 transfers attributed to this op
+  protocols:     ProtocolEvent[] // DeFi events attributed to this op
+  logs:          Log[]           // raw logs attributed to this op
 }
 
 export interface Log {

@@ -4,6 +4,7 @@ import { KNOWN_TOKENS, KNOWN_PROTOCOLS, KNOWN_SELECTORS, KNOWN_TOPICS } from '..
 import { shortAddr } from '../lib/formatters'
 import { useStore } from '../store'
 import { getCachedSelector, getCachedEventTopic, lookupSelector, lookupEventTopic } from '../lib/fourByte'
+import { sigMatchesCalldata } from '../lib/calldataDecoder'
 
 interface HexTagProps {
   value: string
@@ -59,16 +60,16 @@ export function HexTag({
 }
 
 /** Show a method selector. Looks up unknown selectors on 4byte.directory. */
-export function SelectorTag({ selector }: { selector: string | null }) {
+export function SelectorTag({ selector, inputHex }: { selector: string | null; inputHex?: string }) {
   if (!selector) return <span className="muted">—</span>
   const known = KNOWN_SELECTORS[selector]
   if (known) {
     return <HexTag value={selector} type="selector" title={`${selector} → ${known}`} />
   }
-  return <DynamicSelectorTag selector={selector} />
+  return <DynamicSelectorTag selector={selector} inputHex={inputHex} />
 }
 
-function DynamicSelectorTag({ selector }: { selector: string }) {
+function DynamicSelectorTag({ selector, inputHex }: { selector: string; inputHex?: string }) {
   const [resolved, setResolved] = useState<string | null>(
     () => {
       const cached = getCachedSelector(selector)
@@ -81,13 +82,15 @@ function DynamicSelectorTag({ selector }: { selector: string }) {
     lookupSelector(selector).then((result) => { if (result) setResolved(result) })
   }, [selector])
 
-  const name = resolved?.split('(')[0]
+  // Validate the resolved signature against actual calldata to reject selector collisions.
+  const validSig = resolved && inputHex ? (sigMatchesCalldata(resolved, inputHex) ? resolved : null) : resolved
+  const name = validSig?.split('(')[0]
   return (
     <HexTag
       value={selector}
       type="selector"
       label={name}
-      title={resolved ? `${selector} → ${resolved}` : selector}
+      title={validSig ? `${selector} → ${validSig}` : selector}
     />
   )
 }

@@ -55,10 +55,21 @@ function DecodedValueDisplay({ value, type }: { value: DecodedValue; type: strin
       return <DecodedTupleDisplay fields={value.fields} />
     case 'array': {
       const elemName = value.elementType
+      if (value.elements.length === 0) {
+        return <span style={{ color: 'var(--text3)', fontSize: 9 }}>{elemName}[]</span>
+      }
       return (
-        <span style={{ color: 'var(--text3)', fontSize: 9 }}>
-          {elemName}[{value.total}]{value.elements.length > 0 ? ` (${value.elements.length} shown)` : ''}
-        </span>
+        <div style={{ width: '100%' }}>
+          <span style={{ color: 'var(--text3)', fontSize: 9 }}>
+            {elemName}[{value.total}]{value.total > value.elements.length ? ` (${value.elements.length} decoded)` : ''}
+          </span>
+          {value.elements.map((elem, i) => (
+            <div key={i} style={{ display: 'flex', gap: 4, alignItems: 'flex-start', marginTop: 2 }}>
+              <span style={{ color: 'var(--text3)', fontSize: 9, flexShrink: 0, minWidth: 20 }}>[{i}]</span>
+              <DecodedValueDisplay value={elem} type={elemName} />
+            </div>
+          ))}
+        </div>
       )
     }
     default:
@@ -253,7 +264,7 @@ function TraceNode({
 
         {/* Method selector */}
         {node.input && node.input.length >= 10 && (
-          <SelectorTag selector={node.input.slice(0, 10).toLowerCase()} />
+          <SelectorTag selector={node.input.slice(0, 10).toLowerCase()} inputHex={node.input} />
         )}
 
         {/* ETH value */}
@@ -446,7 +457,7 @@ function TxMeta({ txHash, blockNumber }: { txHash: string; blockNumber: number }
           <div key={label} style={{ padding: '6px 12px', borderRight: '1px solid var(--border)' }}>
             <div className="stat-label">{label}</div>
             <div className="stat-value" style={{ fontSize: 11 }}>
-              {label === 'Method' ? <SelectorTag selector={value === '—' ? null : value} /> : value}
+              {label === 'Method' ? <SelectorTag selector={value === '—' ? null : value} inputHex={tx.input} /> : value}
             </div>
           </div>
         ))}
@@ -523,7 +534,7 @@ export function TxView({ txHash, blockNumber }: { txHash: string; blockNumber: n
               {tx.protocols.length > 0 && (
                 <section>
                   <div className="panel-header">Protocol Activity</div>
-                  <ProtocolEventList events={tx.protocols} />
+                  <ProtocolEventList events={tx.protocols} tokenFlows={tx.tokenFlows} />
                 </section>
               )}
 
@@ -585,7 +596,7 @@ export function TxView({ txHash, blockNumber }: { txHash: string; blockNumber: n
                 <>
                   {tx.methodSelector && (
                     <div style={{ marginBottom: 8, fontSize: 11, display: 'flex', alignItems: 'center', gap: 8 }}>
-                      <SelectorTag selector={tx.methodSelector} />
+                      <SelectorTag selector={tx.methodSelector} inputHex={tx.input} />
                       <span className="muted" style={{ fontSize: 9 }}>{tx.input.length / 2 - 2} bytes</span>
                     </div>
                   )}

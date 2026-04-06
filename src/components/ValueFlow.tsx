@@ -1,8 +1,7 @@
 import { useEffect } from 'react'
 import { TokenFlow, EthFlow, ProtocolEvent } from '../types'
-import { KNOWN_TOKENS } from '../lib/protocols'
+import { KNOWN_TOKENS, PROTOCOL_COLORS } from '../lib/protocols'
 import { ACTION_COLORS } from '../lib/colorize'
-import { PROTOCOL_COLORS } from '../lib/protocols'
 import { formatAmount, formatEth, shortAddr } from '../lib/formatters'
 import { HexTag, TokenBadge } from './HexTag'
 import { useStore } from '../store'
@@ -119,16 +118,24 @@ export function EthFlowList({ flows }: { flows: EthFlow[] }) {
 
 // ── Protocol event pills ──────────────────────────────────────────────────
 
-export function ProtocolEventList({ events }: { events: ProtocolEvent[] }) {
-  const { tokenCache, poolCache, fetchPool } = useStore()
+export function ProtocolEventList({ events, tokenFlows }: { events: ProtocolEvent[]; tokenFlows?: TokenFlow[] }) {
+  const { tokenCache, poolCache, fetchPool, fetchToken } = useStore()
 
-  // Ensure pool metadata is fetched for any LP/Swap events referencing a pool
+  // Ensure pool metadata is fetched for any LP/Swap events referencing an address-based pool.
+  // Skip bytes32 V4 pool IDs (66 chars: 0x + 64 hex) — they aren't contract addresses.
+  // Also fetch token metadata for V4 swaps (tokenIn/tokenOut stored in extra by the store).
   useEffect(() => {
     for (const ev of events) {
       const pool = ev.extra?.pool as string | undefined
-      if (pool && !poolCache.has(pool.toLowerCase())) fetchPool(pool.toLowerCase())
+      if (pool && pool.length !== 66 && !poolCache.has(pool.toLowerCase())) fetchPool(pool.toLowerCase())
+      if (ev.protocol === 'Uniswap V4' && ev.action === 'Swap') {
+        const tokenIn  = ev.extra?.tokenIn  as string | undefined
+        const tokenOut = ev.extra?.tokenOut as string | undefined
+        if (tokenIn  && !KNOWN_TOKENS[tokenIn]  && !tokenCache.has(tokenIn))  fetchToken(tokenIn)
+        if (tokenOut && !KNOWN_TOKENS[tokenOut] && !tokenCache.has(tokenOut)) fetchToken(tokenOut)
+      }
     }
-  }, [events, poolCache, fetchPool])
+  }, [events, poolCache, fetchPool, fetchToken, tokenCache])
 
   if (events.length === 0) return null
 
@@ -167,6 +174,22 @@ export function ProtocolEventList({ events }: { events: ProtocolEvent[] }) {
             const a1Out = BigInt((ev.extra?.amount1Out as string | undefined) ?? '0')
             if (a0In > 0n) { swapIn = { tok: tok0, amt: a0In };  swapOut = { tok: tok1, amt: a1Out } }
             else            { swapIn = { tok: tok1, amt: a1In };  swapOut = { tok: tok0, amt: a0Out } }
+          }
+        }
+
+        // V4: tokens annotated at store level in extra.tokenIn/Out/amountIn/Out
+        if (isSwap && !swapIn && ev.protocol === 'Uniswap V4') {
+          const tiAddr = ev.extra?.tokenIn  as string | undefined
+          const toAddr = ev.extra?.tokenOut as string | undefined
+          const aiStr  = ev.extra?.amountIn  as string | undefined
+          const aoStr  = ev.extra?.amountOut as string | undefined
+          if (tiAddr && aiStr) {
+            const tok = resolveToken(tiAddr, tokenCache)
+            if (tok) swapIn = { tok, amt: BigInt(aiStr) }
+          }
+          if (toAddr && aoStr) {
+            const tok = resolveToken(toAddr, tokenCache)
+            if (tok) swapOut = { tok, amt: BigInt(aoStr) }
           }
         }
 

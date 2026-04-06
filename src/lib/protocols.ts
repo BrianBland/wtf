@@ -22,7 +22,6 @@ export const KNOWN_TOKENS: Record<string, TokenInfo> = {
   '0x04c0599ae5a44757c0af6f9ec3b93da8976c150a': { symbol: 'weETH',  decimals: 18, color: '#24b76a' },
   '0xd9aaec86b65d86f6a7b5b1b0c42ffa531710b6ca': { symbol: 'USDbC',  decimals: 6,  color: '#1a8fe3' },
   '0xab36452dbac151be02b16ca17d8919826072f64a': { symbol: 'rETH',   decimals: 18, color: '#ff6b35' },
-  '0x0000000000000000000000000000000000000000': { symbol: 'ETH',    decimals: 18, color: '#627eea' },
 }
 
 export interface ProtocolInfo {
@@ -111,6 +110,9 @@ export const KNOWN_PROTOCOLS: Record<string, ProtocolInfo> = {
   '0xaD09780d193884d503182aD4588450C416D6F9D4': { name: 'CCTP MessageTransmitter',   type: 'bridge' },
   // Chainlink CCIP Router
   '0x881e3a65b4d4a04dd529061dd0071cf975f58bcd': { name: 'CCIP Router',               type: 'bridge' },
+  // ERC-4337 EntryPoint
+  '0x5ff137d4b0fdcd49dca30c7cf57e578a026d2789': { name: 'EntryPoint v0.6',           type: 'other' },
+  '0x0000000071727de22e5e9d8baf0edac6f37da032': { name: 'EntryPoint v0.7',           type: 'other' },
 }
 
 // Address sets for protocol routing disambiguation
@@ -293,10 +295,16 @@ export const KNOWN_SELECTORS: Record<string, string> = {
   '0x18cbafe5': 'swapExactTokensForETH',
   '0xf305d719': 'addLiquidityETH',
   '0x2195995c': 'removeLiquidityWithPermit',
+  // ERC-4337
+  '0x1fad948c': 'handleOps',       // EntryPoint v0.6
+  '0x765e827f': 'handleOps',       // EntryPoint v0.7
   // Misc
   '0x1cff79cd': 'execute',
   '0x6a761202': 'execTransaction', // Gnosis Safe
 }
+
+// ERC-4337 EntryPoint — UserOperationEvent(bytes32 indexed,address indexed,address indexed,uint256,bool,uint256,uint256)
+export const USER_OPERATION_EVENT_TOPIC = '0x49628fd1471006c1482da88028e9ce4dbb080b815c9b0344d39e5a8e6ec1419f'
 
 // ERC20 Transfer — topic0
 export const TRANSFER_TOPIC   = '0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef'
@@ -305,8 +313,10 @@ export const APPROVAL_TOPIC   = '0x8c5be1e5ebec7d5bd14f71427d1e84f3dd0314c0f7b22
 export const UNI_V3_SWAP_TOPIC    = '0xc42079f94a6350d7e6235f29174924f928cc2ac818eb64fed8004e115fbcca67'
 // PancakeSwap V3 Swap — same fields + uint128 protocolFeesToken0, uint128 protocolFeesToken1
 export const PANCAKE_V3_SWAP_TOPIC = '0x19b47279256b2a23a1665c810c8d55a1758940ee09377d4f8d26497a3577dc83'
-// Aerodrome / classic AMM Swap(address,uint,uint,uint,uint,address)
-export const AMM_SWAP_TOPIC   = '0xd78ad95fa46c994b6551d0da85fc275fe613ce37657fb8d5e3d130840159d822'
+// Classic AMM Swap(address indexed sender, uint,uint,uint,uint, address indexed to)
+export const AMM_SWAP_TOPIC         = '0xd78ad95fa46c994b6551d0da85fc275fe613ce37657fb8d5e3d130840159d822'
+// Aerodrome V2 AMM Swap(address indexed sender, address indexed to, uint,uint,uint,uint) — same data layout, different sig
+export const AERODROME_AMM_SWAP_TOPIC = '0xb3e2773606abfd36b5bd91394b3a54d1398336c65005baf7bf7a05efeffaf75b'
 // Aave V3 events
 export const AAVE_SUPPLY_TOPIC       = '0x2b627736bca15cd5381dcf80b0bf11fd197d01a037c52b927a881a10fb73ba61'
 export const AAVE_WITHDRAW_TOPIC     = '0x3115d1449a7b732c986cba18244e897a450f61e1bb8d589cd2e69e6c8924f9f7'
@@ -354,6 +364,11 @@ export const MORPHO_WITHDRAW_TOPIC            = '0xa56fc0ad5702ec05ce63666221f79
 export const MORPHO_WITHDRAW_COLLATERAL_TOPIC = '0xe80ebd7cc9223d7382aab2e0d1d6155c65651f83d53c8b9b06901d167e321142'
 // Liquidate(bytes32 indexed id, address indexed caller, address indexed borrower, uint256 repaidAssets, uint256 repaidShares, uint256 seizedAssets, uint256 badDebtAssets, uint256 badDebtShares)
 export const MORPHO_LIQUIDATE_TOPIC           = '0xa4946ede45d0c6f06a0f5ce92c9ad3b4751452d2fe0e25010783bcab57a67e41'
+// WETH wrap/unwrap events (canonical WETH9 and ERC-4626 WETH)
+// Deposit(address indexed dst, uint256 wad) — emitted on wrap (ETH → WETH)
+export const WETH_DEPOSIT_TOPIC    = '0xe1fffcc4923d04b559f4d29a8bfc6cda04eb5b0d3c460751c2402c5c5cc9109c'
+// Withdrawal(address indexed src, uint256 wad) — emitted on unwrap (WETH → ETH)
+export const WETH_WITHDRAWAL_TOPIC = '0x7fcf532c15f0a6db0bd6d0e038bea71d30d808c7d98cb3bf7268a95bf5081b65'
 // Euler V2 EVault events (ERC-4626 + custom borrow/repay)
 // Deposit(address indexed caller, address indexed owner, uint256 assets, uint256 shares)
 export const EULER_DEPOSIT_TOPIC  = '0xdcbc1c05240f31ff3ad067ef1ee35ce4997762752e3a095284754544f4c709d7'
@@ -496,9 +511,12 @@ export const PROTOCOL_COLORS: Record<string, string> = {
 export const KNOWN_TOPICS: Record<string, string> = {
   [TRANSFER_TOPIC]:                    'Transfer',
   [APPROVAL_TOPIC]:                    'Approval',
+  [WETH_DEPOSIT_TOPIC]:                'Deposit (wrap)',
+  [WETH_WITHDRAWAL_TOPIC]:             'Withdrawal (unwrap)',
   [UNI_V3_SWAP_TOPIC]:                 'Swap (V3)',
   [PANCAKE_V3_SWAP_TOPIC]:             'Swap (V3)',
   [AMM_SWAP_TOPIC]:                    'Swap (AMM)',
+  [AERODROME_AMM_SWAP_TOPIC]:          'Swap (AMM)',
   [AAVE_SUPPLY_TOPIC]:                 'Supply',
   [AAVE_WITHDRAW_TOPIC]:               'Withdraw',
   [AAVE_BORROW_TOPIC]:                 'Borrow',
