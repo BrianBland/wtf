@@ -197,7 +197,7 @@ function SummaryStats({ blocks }: { blocks: Block[] }) {
 
 // ── Classified protocol histogram ─────────────────────────────────────────
 
-const PROTO_CLASS_ORDER = ['Concentrated Liquidity', 'Classic AMM', 'Lending', 'Other']
+const PROTO_CLASS_ORDER = ['Concentrated Liquidity', 'Classic AMM', 'Lending', 'Bridge', 'Perps DEX', 'Aggregator', 'Other']
 
 function ClassifiedProtocolHistogram({ entries, sortBy }: { entries: HistEntry[]; sortBy: SortKey }) {
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set())

@@ -33,13 +33,18 @@ import {
   L2_DEPOSIT_FINALIZED_TOPIC, L2_WITHDRAWAL_INITIATED_TOPIC,
   ACROSS_FUNDS_DEPOSITED_TOPIC, ACROSS_FILLED_RELAY_TOPIC,
   STARGATE_OFT_SENT_TOPIC, STARGATE_OFT_RECEIVED_TOPIC,
+  UNI_V4_SWAP_TOPIC, UNI_V4_POOL_MANAGER_ADDRESS,
+  CCTP_DEPOSIT_FOR_BURN_TOPIC, CCTP_MINT_AND_WITHDRAW_TOPIC, CCTP_V1_TOKEN_MESSENGER_ADDRESS,
+  CCTP_DOMAIN_NAMES,
+  CCIP_SEND_REQUESTED_TOPIC, CCIP_EXECUTION_STATE_CHANGED_TOPIC,
+  CCIP_ONRAMP_CHAINS, CCIP_OFFRAMP_CHAINS,
   AERODROME_ADDRESSES, UNISWAP_V3_ADDRESSES,
   MORPHO_BLUE_ADDRESS, BALANCER_VAULT_ADDRESS,
   SEAMLESS_POOL_ADDRESS, AAVE_V3_POOL_ADDRESS, COMPOUND3_ADDRESSES,
   AVANTIS_TRADING_ADDRESS, WASABI_ADDRESSES,
   KYBERSWAP_ROUTER_ADDRESS, OPENOCEAN_ROUTER_ADDRESS, ZEROX_PROXY_ADDRESS,
   BASE_L2_BRIDGE_ADDRESS, ACROSS_SPOKE_POOL_ADDRESS, STARGATE_V2_USDC_ADDRESS,
-  EVM_CHAIN_NAMES, LZ_EID_NAMES,
+  EVM_CHAIN_NAMES, LZ_EID_NAMES, ETH_NATIVE_ADDRESS,
 } from '../lib/protocols'
 import {
   hexToBigInt, hexToNumber, getSelector,
@@ -357,6 +362,19 @@ function processLogs(
       protocols.push({ protocol: '0x Protocol', action: 'Swap' })
     }
 
+    // Uniswap V4 — Pool Manager is a singleton; all pools emit Swap here
+    // Swap(bytes32 indexed id, address indexed sender, int128 amount0, int128 amount1, uint160 sqrtPriceX96, uint128 liquidity, int24 tick, uint24 fee)
+    if (t0 === UNI_V4_SWAP_TOPIC && log.address === UNI_V4_POOL_MANAGER_ADDRESS) {
+      protocols.push({
+        protocol: 'Uniswap V4', action: 'Swap',
+        extra: {
+          pool:    log.topics[1] ?? '',  // bytes32 pool id
+          amount0: decodeInt256(log.data, 0).toString(),
+          amount1: decodeInt256(log.data, 1).toString(),
+        },
+      })
+    }
+
     // ── Bridges ─────────────────────────────────────────────────────────────
 
     // Base canonical bridge (L2StandardBridge)
@@ -382,6 +400,7 @@ function processLogs(
         // ETH bridge IN (from Ethereum → Base)
         protocols.push({
           protocol: 'Base Bridge', action: 'Bridge In',
+          token:  ETH_NATIVE_ADDRESS,
           amount: decodeUint256(log.data, 0),
           extra:  { chain: 'Ethereum' },
         })
@@ -389,24 +408,32 @@ function processLogs(
         // ETH bridge OUT (Base → Ethereum)
         protocols.push({
           protocol: 'Base Bridge', action: 'Bridge Out',
+          token:  ETH_NATIVE_ADDRESS,
           amount: decodeUint256(log.data, 0),
           extra:  { chain: 'Ethereum' },
         })
       } else if (t0 === L2_DEPOSIT_FINALIZED_TOPIC) {
-        // Legacy ERC20 bridge-in (still emitted for some tokens alongside ERC20BridgeFinalized)
-        protocols.push({
-          protocol: 'Base Bridge', action: 'Bridge In',
-          token:  log.topics[2] ? topicToAddress(log.topics[2]) : undefined,  // l2Token
-          amount: decodeUint256(log.data, 1),
-          extra:  { chain: 'Ethereum' },
-        })
+        // Legacy ERC20 bridge-in. Skip when l1Token (topics[1]) is zero address — that means ETH,
+        // which is already captured by ETHBridgeFinalized above (both events fire for ETH deposits).
+        const l1Token = log.topics[1] ? topicToAddress(log.topics[1]) : null
+        if (l1Token && l1Token !== '0x0000000000000000000000000000000000000000') {
+          protocols.push({
+            protocol: 'Base Bridge', action: 'Bridge In',
+            token:  log.topics[2] ? topicToAddress(log.topics[2]) : undefined,  // l2Token
+            amount: decodeUint256(log.data, 1),
+            extra:  { chain: 'Ethereum' },
+          })
+        }
       } else if (t0 === L2_WITHDRAWAL_INITIATED_TOPIC) {
-        protocols.push({
-          protocol: 'Base Bridge', action: 'Bridge Out',
-          token:  log.topics[2] ? topicToAddress(log.topics[2]) : undefined,  // l2Token
-          amount: decodeUint256(log.data, 1),
-          extra:  { chain: 'Ethereum' },
-        })
+        const l1Token = log.topics[1] ? topicToAddress(log.topics[1]) : null
+        if (l1Token && l1Token !== '0x0000000000000000000000000000000000000000') {
+          protocols.push({
+            protocol: 'Base Bridge', action: 'Bridge Out',
+            token:  log.topics[2] ? topicToAddress(log.topics[2]) : undefined,  // l2Token
+            amount: decodeUint256(log.data, 1),
+            extra:  { chain: 'Ethereum' },
+          })
+        }
       }
     }
 
@@ -449,6 +476,50 @@ function processLogs(
           protocol: 'Stargate V2', action: 'Bridge In',
           amount: decodeUint256(log.data, 1),
           extra:  { chain: LZ_EID_NAMES[srcEid] ?? `EID ${srcEid}` },
+        })
+      }
+    }
+
+    // Circle CCTP v1 — cross-chain USDC burn+mint
+    if (log.address === CCTP_V1_TOKEN_MESSENGER_ADDRESS) {
+      if (t0 === CCTP_DEPOSIT_FOR_BURN_TOPIC) {
+        // Bridge OUT: DepositForBurn
+        // topics[2]=burnToken (indexed), data[0]=amount, data[2]=destinationDomain (uint32)
+        const destDomain = Number(decodeUint256(log.data, 2))
+        protocols.push({
+          protocol: 'CCTP', action: 'Bridge Out',
+          token:  log.topics[2] ? topicToAddress(log.topics[2]) : undefined,
+          amount: decodeUint256(log.data, 0),
+          extra:  { chain: CCTP_DOMAIN_NAMES[destDomain] ?? `Domain ${destDomain}` },
+        })
+      } else if (t0 === CCTP_MINT_AND_WITHDRAW_TOPIC) {
+        // Bridge IN: MintAndWithdraw
+        // topics[2]=mintToken (indexed), data[0]=amount
+        protocols.push({
+          protocol: 'CCTP', action: 'Bridge In',
+          token:  log.topics[2] ? topicToAddress(log.topics[2]) : undefined,
+          amount: decodeUint256(log.data, 0),
+        })
+      }
+    }
+
+    // Chainlink CCIP — per-lane OnRamps (outbound) and OffRamps (inbound)
+    // Each OnRamp/OffRamp contract handles exactly one destination/source lane
+    if (t0 === CCIP_SEND_REQUESTED_TOPIC) {
+      const destChain = CCIP_ONRAMP_CHAINS[log.address]
+      if (destChain !== undefined) {
+        protocols.push({
+          protocol: 'Chainlink CCIP', action: 'Bridge Out',
+          extra: { chain: destChain },
+        })
+      }
+    }
+    if (t0 === CCIP_EXECUTION_STATE_CHANGED_TOPIC) {
+      const srcChain = CCIP_OFFRAMP_CHAINS[log.address]
+      if (srcChain !== undefined) {
+        protocols.push({
+          protocol: 'Chainlink CCIP', action: 'Bridge In',
+          extra: { chain: srcChain },
         })
       }
     }

@@ -6,7 +6,11 @@ export interface TokenInfo {
   color: string
 }
 
+// Sentinel address for native ETH (used when a bridge or protocol deals in ETH, not WETH)
+export const ETH_NATIVE_ADDRESS = '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee'
+
 export const KNOWN_TOKENS: Record<string, TokenInfo> = {
+  '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee': { symbol: 'ETH',    decimals: 18, color: '#627eea' },
   '0x4200000000000000000000000000000000000006': { symbol: 'WETH',   decimals: 18, color: '#627eea' },
   '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913': { symbol: 'USDC',   decimals: 6,  color: '#2775ca' },
   '0xfde4c96c8593536e31f229ea8f37b2ada2699bb2': { symbol: 'USDT',   decimals: 6,  color: '#26a17b' },
@@ -99,6 +103,14 @@ export const KNOWN_PROTOCOLS: Record<string, ProtocolInfo> = {
   // Wasabi Protocol (options / perps)
   '0xbdae5df498a45c5f058e3a09afe9ba4da7b248aa': { name: 'Wasabi Long Pool',          type: 'other' },
   '0xa456c77d358c9c89f4dfb294fa2a47470b7da37c': { name: 'Wasabi Short Pool',         type: 'other' },
+  // Uniswap V4
+  '0x6ff5693b99212da76ad316178a184ab56d299b43': { name: 'Uniswap V4 Universal Router', type: 'dex' },
+  '0x498581ff718922c3f8e6a244956af099b2652b2b': { name: 'Uniswap V4 Pool Manager',    type: 'dex' },
+  // Circle CCTP v1
+  '0x1682ae6375c4e4a97e4b583bc394c861a46d8962': { name: 'CCTP TokenMessenger',       type: 'bridge' },
+  '0xaD09780d193884d503182aD4588450C416D6F9D4': { name: 'CCTP MessageTransmitter',   type: 'bridge' },
+  // Chainlink CCIP Router
+  '0x881e3a65b4d4a04dd529061dd0071cf975f58bcd': { name: 'CCIP Router',               type: 'bridge' },
 }
 
 // Address sets for protocol routing disambiguation
@@ -155,6 +167,48 @@ export const WASABI_ADDRESSES = new Set([
 export const KYBERSWAP_ROUTER_ADDRESS  = '0x6131b5fae19ea4f9d964eac0408e4408b66337b5'
 export const OPENOCEAN_ROUTER_ADDRESS  = '0x6352a56caadc4f1e25cd6c75970fa768a3304e64'
 export const ZEROX_PROXY_ADDRESS       = '0xdef1c0ded9bec7f1a1670819833240f027b25eff'
+
+// Uniswap V4 — Pool Manager is a singleton (all pools share one contract)
+export const UNI_V4_POOL_MANAGER_ADDRESS = '0x498581ff718922c3f8e6a244956af099b2652b2b'
+
+// Circle CCTP v1 — cross-chain USDC transfers via burn+mint
+export const CCTP_V1_TOKEN_MESSENGER_ADDRESS = '0x1682ae6375c4e4a97e4b583bc394c861a46d8962'
+
+// CCTP domain ID → chain name
+export const CCTP_DOMAIN_NAMES: Record<number, string> = {
+  0: 'Ethereum',
+  1: 'Avalanche',
+  2: 'Optimism',
+  3: 'Arbitrum',
+  4: 'Noble',
+  5: 'Solana',
+  6: 'Base',
+  7: 'Polygon',
+  8: 'Sui',
+  9: 'Aptos',
+}
+
+// Chainlink CCIP OnRamp address → destination chain name (Bridge Out)
+// Each OnRamp is a dedicated per-lane contract; source is always Base
+export const CCIP_ONRAMP_CHAINS: Record<string, string> = {
+  '0x362e6be957c18e268ad91046ca6b47eb09ad98c1': 'Optimism',
+  '0xe5fd5a0ec3657ad58e875518e73f6264e00eb754': 'BNB Chain',
+  '0xd3bde678bb706cf727a512515c254bcf021dd203': 'Polygon',
+  '0x56b30a0dcd8dc87ec08b80fa09502bab801fa78e': 'Ethereum',
+  '0x9d0ffa76c7f82c34be313b5bfc6d42a72da8ca69': 'Arbitrum',
+  '0x4be6e0f97ea849ff80773af7a317356e6c646fd7': 'Avalanche',
+}
+
+// Chainlink CCIP OffRamp address → source chain name (Bridge In)
+// Each OffRamp is a dedicated per-lane contract; destination is always Base
+export const CCIP_OFFRAMP_CHAINS: Record<string, string> = {
+  '0xca04169671a81e4fb8768cfad46c347ae65371f1': 'Ethereum',
+  '0x18095fbd53184a50c2bb3929a6c62ca328732062': 'Optimism',
+  '0x45d524b6fe99c005c52c65c578dc0e02d9751083': 'BNB Chain',
+  '0x74d574d11977fc8d40f8590c419504cbe178adb7': 'Polygon',
+  '0x7d38c6363d5e4dfd500a691bc34878b383f58d93': 'Arbitrum',
+  '0x0a44db4366385483cbcc9460fa55a75345553286': 'Unknown',  // chain selector 0x5ffb1764e3994092
+}
 
 // Bridge contracts
 export const BASE_L2_BRIDGE_ADDRESS    = '0x4200000000000000000000000000000000000010'
@@ -366,11 +420,28 @@ export const OPENOCEAN_SWAPPED_TOPIC  = '0x76af224a143865a50b41496e1a73622698692
 // 0x Exchange Proxy — TransformedERC20(address indexed taker, address inputToken, address outputToken, uint256 inputTokenAmount, uint256 outputTokenAmount)
 export const ZEROX_TRANSFORMED_ERC20_TOPIC = '0x0f6672f78a59ba8e5e5b5d38df3ebc67f3c792e2c9259b8d97d7f00dd78ba1b3'
 
+// Uniswap V4 — Swap(bytes32 indexed id, address indexed sender, int128 amount0, int128 amount1, uint160 sqrtPriceX96, uint128 liquidity, int24 tick, uint24 fee)
+export const UNI_V4_SWAP_TOPIC = '0x40e9cecb9f5f1f1c5b9c97dec2917b7ee92e57ba5563708daca94dd84ad7112f'
+
+// Circle CCTP v1 events (from TokenMessenger)
+// DepositForBurn(uint64 indexed nonce, address indexed burnToken, uint256 amount, address indexed depositor, bytes32 mintRecipient, uint32 destinationDomain, bytes32 destinationTokenMessenger, bytes32 destinationCaller)
+export const CCTP_DEPOSIT_FOR_BURN_TOPIC    = '0x2fa9ca894982930190727e75500a97d8dc500233a5065e0f3126c48fbe0343c0'
+// MintAndWithdraw(address indexed mintRecipient, uint256 amount, address indexed mintToken)
+export const CCTP_MINT_AND_WITHDRAW_TOPIC   = '0x1b2a7ff080b8cb6ff436ce0372e399692bbfb6d4ae5766fd8d58a7b8cc6142e6'
+
+// Chainlink CCIP events
+// CCIPSendRequested(EVM2EVMMessage message) — from OnRamp; message struct is ABI-encoded in data (no indexed params)
+export const CCIP_SEND_REQUESTED_TOPIC            = '0xd0c3c799bf9e2639de44391e7f524d229b2b55f5b1ea94b2bf7da42f7243dddd'
+// ExecutionStateChanged(uint64 indexed sequenceNumber, bytes32 indexed messageId, uint8 state, bytes returnData) — from OffRamp
+export const CCIP_EXECUTION_STATE_CHANGED_TOPIC   = '0xd4f851956a5d67c3997d1c9205045fef79bae2947fdee7e9e2641abc7391ef65'
+
 // ── Protocol brand colors ─────────────────────────────────────────────────
 // Shared across Histogram, ProtocolDrillDown, and any other component that
 // needs to color-code protocol names consistently.
 
 export const PROTOCOL_COLORS: Record<string, string> = {
+  // DEX — V4
+  'Uniswap V4':      '#ff3399',
   // DEX — V3-style CL
   'Uniswap V3':      '#ff007a',
   'Aerodrome CL':    '#0052ff',  // Aerodrome brand blue
@@ -401,6 +472,8 @@ export const PROTOCOL_COLORS: Record<string, string> = {
   'Base Bridge':     '#003fd1',
   'Across':          '#00d395',
   'Stargate V2':     '#f3a217',
+  'CCTP':            '#00b4d8',
+  'Chainlink CCIP':  '#375bd2',
   // Perps DEX
   'Avantis':         '#ff4500',
   'Wasabi':          '#9333ea',
@@ -480,10 +553,16 @@ export const KNOWN_TOPICS: Record<string, string> = {
   [KYBERSWAP_SWAPPED_TOPIC]:           'Swapped',
   [OPENOCEAN_SWAPPED_TOPIC]:           'Swapped',
   [ZEROX_TRANSFORMED_ERC20_TOPIC]:     'TransformedERC20',
+  [UNI_V4_SWAP_TOPIC]:                 'Swap (V4)',
+  [CCTP_DEPOSIT_FOR_BURN_TOPIC]:       'DepositForBurn',
+  [CCTP_MINT_AND_WITHDRAW_TOPIC]:      'MintAndWithdraw',
+  [CCIP_SEND_REQUESTED_TOPIC]:         'CCIPSendRequested',
+  [CCIP_EXECUTION_STATE_CHANGED_TOPIC]: 'ExecutionStateChanged',
 }
 
 export const PROTOCOL_CLASSIFICATION: Record<string, string> = {
   // Concentrated Liquidity (tick-based CL AMMs)
+  'Uniswap V4':      'Concentrated Liquidity',
   'Uniswap V3':      'Concentrated Liquidity',
   'Aerodrome CL':    'Concentrated Liquidity',
   'Unknown CL':      'Concentrated Liquidity',
@@ -514,6 +593,8 @@ export const PROTOCOL_CLASSIFICATION: Record<string, string> = {
   'Base Bridge':     'Bridge',
   'Across':          'Bridge',
   'Stargate V2':     'Bridge',
+  'CCTP':            'Bridge',
+  'Chainlink CCIP':  'Bridge',
   // Perps DEX
   'Avantis':         'Perps DEX',
   'Wasabi':          'Perps DEX',
