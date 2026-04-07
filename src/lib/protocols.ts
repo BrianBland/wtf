@@ -92,7 +92,6 @@ export const KNOWN_PROTOCOLS: Record<string, ProtocolInfo> = {
   '0x6352a56caadc4f1e25cd6c75970fa768a3304e64': { name: 'OpenOcean Router',          type: 'dex' },
   '0xdef1c0ded9bec7f1a1670819833240f027b25eff': { name: '0x Exchange Proxy',         type: 'dex' },
   // Bridges — canonical + third-party
-  '0x4200000000000000000000000000000000000010': { name: 'Base Bridge',               type: 'bridge' },
   '0x09aea4b2242abc8bb4bb78d537a67a245a7bec64': { name: 'Across SpokePool',          type: 'bridge' },
   '0x27a16dc786820b16e5c9028b75b99f6f604b5d26': { name: 'Stargate V2',               type: 'bridge' },
   // Stargate V1 (legacy)
