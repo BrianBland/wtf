@@ -107,11 +107,20 @@ export default function App() {
             >Block Range</button>
             <button
               className={`topbar-btn ${nav.view === 'block' ? 'active' : ''}`}
-              onClick={() => nav.view === 'block' ? undefined : undefined}
+              disabled={nav.blockNumber === undefined || nav.view === 'block'}
+              onClick={() => {
+                if (nav.blockNumber !== undefined) goto({ view: 'block', blockNumber: nav.blockNumber })
+              }}
               style={{ opacity: nav.view === 'block' ? 1 : 0.4 }}
             >Block {nav.blockNumber ? `#${nav.blockNumber.toLocaleString()}` : ''}</button>
             <button
               className={`topbar-btn ${nav.view === 'tx' ? 'active' : ''}`}
+              disabled={nav.txHash === undefined || nav.blockNumber === undefined || nav.view === 'tx'}
+              onClick={() => {
+                if (nav.txHash && nav.blockNumber !== undefined) {
+                  goto({ view: 'tx', txHash: nav.txHash, blockNumber: nav.blockNumber })
+                }
+              }}
               style={{ opacity: nav.view === 'tx' ? 1 : 0.4 }}
             >Tx {nav.txHash ? nav.txHash.slice(0, 10) + '…' : ''}</button>
           </nav>
@@ -139,7 +148,7 @@ export default function App() {
         {nav.view === 'tx' && nav.txHash && nav.blockNumber !== undefined && (
           <TxView txHash={nav.txHash} blockNumber={nav.blockNumber} />
         )}
-        {(nav.view === 'range' || nav.view === 'block') && !initialized && (connected || !connected) && (
+        {nav.view !== 'config' && !initialized && (
           <div className="empty-state">
             {connected ? 'Loading block data…' : 'Connect to an RPC to load blocks'}<br />
             <div className="shimmer" style={{ width: 200, margin: '12px auto' }} />

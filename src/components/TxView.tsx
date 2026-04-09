@@ -11,6 +11,7 @@ import {
 } from '../lib/formatters'
 import { decodeCalldata, decodeCalldataFromSig, decodeLog, EVENT_ABI_MAP, DecodedValue, DecodedParam, DecodedCall } from '../lib/calldataDecoder'
 import { getCachedSelector, lookupSelector, getCachedEventTopic, lookupEventTopic } from '../lib/fourByte'
+import { useCachedLookup } from '../hooks/useCachedLookup'
 
 // ── Decoded calldata view ─────────────────────────────────────────────────
 
@@ -94,23 +95,12 @@ function DecodedTupleDisplay({ fields }: { fields: DecodedParam[] }) {
 
 function DecodedLogView({ log }: { log: Log }) {
   const topic0 = log.topics[0]
-
-  // Track the full Sourcify text signature for unknown events
-  const [sig, setSig] = useState<string | null>(() => {
-    if (!topic0) return null
-    const cached = getCachedEventTopic(topic0)
-    return typeof cached === 'string' ? cached : null
-  })
-
-  useEffect(() => {
-    if (!topic0) { setSig(null); return }
-    if (topic0 in EVENT_ABI_MAP) { setSig(null); return }
-    const cached = getCachedEventTopic(topic0)
-    if (typeof cached === 'string') { setSig(cached); return }
-    setSig(null)
-    if (cached === null) return
-    lookupEventTopic(topic0).then((result) => { if (result) setSig(result) })
-  }, [topic0])
+  const resolvedTopicSig = useCachedLookup(
+    topic0 ?? '',
+    getCachedEventTopic,
+    lookupEventTopic,
+  )
+  const sig = !topic0 || topic0 in EVENT_ABI_MAP ? null : resolvedTopicSig
 
   const decoded = topic0 ? decodeLog(log.topics, log.data, topic0, sig ?? undefined) : null
 
@@ -148,23 +138,62 @@ function DecodedLogView({ log }: { log: Log }) {
   )
 }
 
+function useResolvedSelectorSignature(selector: string): string | null {
+  return useCachedLookup(selector, getCachedSelector, lookupSelector)
+}
+
+function decodeCallWithFallback(input: string, selector: string, sig: string | null): DecodedCall | null {
+  return decodeCalldata(input, selector) ?? (sig ? decodeCalldataFromSig(input, sig) : null)
+}
+
+function RawCalldataView({
+  input,
+  byteLen,
+  words,
+  openByDefault,
+  compact = false,
+}: {
+  input: string
+  byteLen: number
+  words: string[]
+  openByDefault: boolean
+  compact?: boolean
+}) {
+  return (
+    <details open={openByDefault}>
+      <summary style={{
+        cursor: 'pointer',
+        fontSize: 9,
+        color: 'var(--text3)',
+        userSelect: 'none',
+        ...(compact
+          ? { padding: '2px 12px' }
+          : { marginBottom: 4 }),
+      }}>
+        raw calldata{compact ? ` (${byteLen} bytes)` : ''}
+      </summary>
+      <div style={{
+        fontSize: 10,
+        wordBreak: 'break-all',
+        lineHeight: 2,
+        fontFamily: 'var(--font-mono)',
+        background: 'var(--surface2)',
+        ...(compact
+          ? { padding: '6px 12px', borderTop: '1px solid var(--border)' }
+          : { padding: '8px 10px', borderRadius: 2, border: '1px solid var(--border)' }),
+      }}>
+        <span style={{ color: 'var(--purple)' }}>{input.slice(0, 10)}</span>
+        {words.map((word, i) => (
+          <span key={i} style={{ color: WORD_COLORS[i % WORD_COLORS.length] }}>{word}</span>
+        ))}
+      </div>
+    </details>
+  )
+}
+
 export function DecodedCallView({ input, selector }: { input: string; selector: string }) {
-  const [sig, setSig] = useState<string | null>(() => {
-    const cached = getCachedSelector(selector)
-    return typeof cached === 'string' ? cached : null
-  })
-
-  useEffect(() => {
-    const cached = getCachedSelector(selector)
-    if (typeof cached === 'string') { setSig(cached); return }
-    setSig(null)
-    if (cached === null) return
-    lookupSelector(selector).then((result) => { if (result) setSig(result) })
-  }, [selector])
-
-  const decoded: DecodedCall | null =
-    decodeCalldata(input, selector) ??
-    (sig ? decodeCalldataFromSig(input, sig) : null)
+  const sig = useResolvedSelectorSignature(selector)
+  const decoded = decodeCallWithFallback(input, selector, sig)
 
   // Slice calldata body (after 4-byte selector) into 32-byte (64 hex char) words
   const calldataBody = input.slice(10)
@@ -174,31 +203,19 @@ export function DecodedCallView({ input, selector }: { input: string; selector: 
   const hasDecoded = decoded && decoded.params.length > 0
   const byteLen = Math.floor((input.length - 2) / 2)
 
-  const rawCalldata = (
-    <details open={!hasDecoded && byteLen <= 100}>
-      <summary style={{ cursor: 'pointer', fontSize: 9, color: 'var(--text3)', padding: '2px 12px', userSelect: 'none' }}>
-        raw calldata ({Math.floor((input.length - 2) / 2)} bytes)
-      </summary>
-      <div style={{
-        fontSize: 10, wordBreak: 'break-all', lineHeight: 2,
-        fontFamily: 'var(--font-mono)', background: 'var(--surface2)',
-        padding: '6px 12px', borderTop: '1px solid var(--border)',
-      }}>
-        <span style={{ color: 'var(--purple)' }}>{input.slice(0, 10)}</span>
-        {words.map((word, i) => (
-          <span key={i} style={{ color: WORD_COLORS[i % WORD_COLORS.length] }}>{word}</span>
-        ))}
-      </div>
-    </details>
-  )
-
   if (!decoded) {
     return (
       <div>
         <div style={{ padding: '4px 12px', fontSize: 10, color: 'var(--text3)', fontFamily: 'var(--font-mono)' }}>
           {selector}
         </div>
-        {rawCalldata}
+        <RawCalldataView
+          input={input}
+          byteLen={byteLen}
+          words={words}
+          openByDefault={byteLen <= 100}
+          compact
+        />
       </div>
     )
   }
@@ -219,7 +236,13 @@ export function DecodedCallView({ input, selector }: { input: string; selector: 
           </div>
         ))}
       </div>
-      {rawCalldata}
+      <RawCalldataView
+        input={input}
+        byteLen={byteLen}
+        words={words}
+        openByDefault={!hasDecoded && byteLen <= 100}
+        compact
+      />
     </div>
   )
 }
@@ -303,25 +326,12 @@ function TraceNode({
 // ── Input tab decoded params ──────────────────────────────────────────────
 
 function InputCalldataSection({ input, selector }: { input: string; selector: string }) {
-  const [sig, setSig] = useState<string | null>(() => {
-    const cached = getCachedSelector(selector)
-    return typeof cached === 'string' ? cached : null
-  })
-
-  useEffect(() => {
-    const cached = getCachedSelector(selector)
-    if (typeof cached === 'string') { setSig(cached); return }
-    setSig(null)
-    if (cached === null) return
-    lookupSelector(selector).then((result) => { if (result) setSig(result) })
-  }, [selector])
-
-  const decoded: DecodedCall | null =
-    decodeCalldata(input, selector) ??
-    (sig ? decodeCalldataFromSig(input, sig) : null)
+  const sig = useResolvedSelectorSignature(selector)
+  const decoded = decodeCallWithFallback(input, selector, sig)
 
   const hasDecoded = decoded && decoded.params.length > 0
   const byteLen = Math.floor((input.length - 2) / 2)
+  const words = input.slice(10).match(/.{1,64}/g) ?? []
 
   return (
     <>
@@ -338,24 +348,12 @@ function InputCalldataSection({ input, selector }: { input: string; selector: st
           ))}
         </div>
       )}
-      <details open={!hasDecoded && byteLen <= 100}>
-        <summary style={{ cursor: 'pointer', fontSize: 9, color: 'var(--text3)', marginBottom: 4, userSelect: 'none' }}>
-          raw calldata
-        </summary>
-        <div style={{
-          fontSize: 10, wordBreak: 'break-all', lineHeight: 2,
-          fontFamily: 'var(--font-mono)',
-          background: 'var(--surface2)',
-          padding: '8px 10px',
-          borderRadius: 2,
-          border: '1px solid var(--border)',
-        }}>
-          <span style={{ color: 'var(--purple)' }}>{input.slice(0, 10)}</span>
-          {input.slice(10).match(/.{1,64}/g)?.map((word, i) => (
-            <span key={i} style={{ color: WORD_COLORS[i % WORD_COLORS.length] }}>{word}</span>
-          ))}
-        </div>
-      </details>
+      <RawCalldataView
+        input={input}
+        byteLen={byteLen}
+        words={words}
+        openByDefault={!hasDecoded && byteLen <= 100}
+      />
     </>
   )
 }

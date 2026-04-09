@@ -1,5 +1,6 @@
 import { Block } from '../types'
 import { HistEntry } from '../components/Histogram'
+import { txGasUsed } from './txMetrics'
 
 export type AggMetric = 'txs' | 'gas'
 
@@ -28,7 +29,7 @@ export function buildHistograms(blocks: Block[]): BlockHistograms {
 
   for (const block of blocks) {
     for (const tx of block.transactions) {
-      const kgas = Number(tx.gasUsed ?? tx.gas) / 1000
+      const kgas = Number(txGasUsed(tx)) / 1000
       add(senders, tx.from, kgas)
       if (tx.to) add(recipients, tx.to, kgas)
       if (tx.methodSelector) add(selectors, tx.methodSelector, kgas)

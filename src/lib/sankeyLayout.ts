@@ -4,6 +4,7 @@
 import { USDC, WETH, CBBTC } from './metaFlow'
 import { KNOWN_PROTOCOLS, KNOWN_TOKENS } from './protocols'
 import { shortAddr } from './formatters'
+import { compareBigIntDesc } from './bigintMath'
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -164,7 +165,7 @@ export function allocateEdges(
 
   const fromMap = new Map(fromNodes.map((n) => [n.id, n]))
   const toMap   = new Map(toNodes.map((n)   => [n.id, n]))
-  const sorted  = [...edges].sort((a, b) => Number(b.totalUSD - a.totalUSD))
+  const sorted  = [...edges].sort((a, b) => compareBigIntDesc(a.totalUSD, b.totalUSD))
 
   const result: LEdge[] = []
   for (const e of sorted) {

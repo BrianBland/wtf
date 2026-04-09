@@ -43,6 +43,7 @@ export const KNOWN_PROTOCOLS: Record<string, ProtocolInfo> = {
   '0x827922686190fd9b3eb5c2af8154a8ab3efb61d5': { name: 'Aerodrome Voter',           type: 'dex' },
   '0x5e7bb104d84c7cb9b682aac2f3d509f5f406809a': { name: 'Aerodrome CL Factory',      type: 'dex' },
   '0xbe6d8f0d05cc4be24d5167a3ef062215be6d18a5': { name: 'Aerodrome CL SwapRouter',   type: 'dex' },
+  '0xe1f8cd9ac4e4a65f54f38a5cdafca44f6dd68b53': { name: 'Aerodrome CL Position Manager', type: 'dex' },
   // PancakeSwap
   '0x678aa4bf4e210cf2166753e054d5b7c31cc7fa86': { name: 'PancakeSwap V3 Router',     type: 'dex' },
   '0x0bfbcf9fa4f9c56b0f40a671ad40e0805a091865': { name: 'PancakeSwap V3 Factory',    type: 'dex' },
@@ -121,6 +122,11 @@ export const AERODROME_ADDRESSES = new Set([
   '0x827922686190fd9b3eb5c2af8154a8ab3efb61d5',  // Voter
   '0x5e7bb104d84c7cb9b682aac2f3d509f5f406809a',  // CL Factory
   '0xbe6d8f0d05cc4be24d5167a3ef062215be6d18a5',  // CL SwapRouter
+  '0xe1f8cd9ac4e4a65f54f38a5cdafca44f6dd68b53',  // CL Position Manager
+])
+
+export const AERODROME_CL_POSITION_MANAGER_ADDRESSES = new Set([
+  '0xe1f8cd9ac4e4a65f54f38a5cdafca44f6dd68b53',
 ])
 
 export const UNISWAP_V3_ADDRESSES = new Set([
@@ -129,6 +135,11 @@ export const UNISWAP_V3_ADDRESSES = new Set([
   '0x198ef1ec325a96cc354c7266a038be8b5c558f67',  // NonfungiblePositionManager
   '0x03a520b32c04bf3beef7beb72e919cf822ed34f1',  // NonfungiblePositionManager2
   '0x3fc91a3afd70395cd496c647d5a6cc9d4b2b7fad',  // Universal Router
+])
+
+export const UNISWAP_V3_POSITION_MANAGER_ADDRESSES = new Set([
+  '0x198ef1ec325a96cc354c7266a038be8b5c558f67',
+  '0x03a520b32c04bf3beef7beb72e919cf822ed34f1',
 ])
 
 // Fixed-address protocols (same across all chains)

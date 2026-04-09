@@ -1,11 +1,14 @@
 import { useMemo, useState, useRef, useEffect, useCallback } from 'react'
 import { Block, Transaction } from '../types'
 import { useStore } from '../store'
-import { aggregateKeys, computeParallelization, KeyStats, StateAccess } from '../lib/stateAccess'
+import { aggregateKeys, computeParallelization, KeyStats } from '../lib/stateAccess'
 import { bandPath, addrLabel } from '../lib/sankeyLayout'
 import { keyToHsl } from '../lib/colorize'
 import { shortAddr, formatGas } from '../lib/formatters'
 import { KNOWN_PROTOCOLS } from '../lib/protocols'
+import { compareBigIntDesc } from '../lib/bigintMath'
+import { effectivePriorityFee, totalTxFee, txGasUsed } from '../lib/txMetrics'
+import { usePrefetchTokenMetadata } from '../hooks/usePrefetchMetadata'
 
 // ── Colors ─────────────────────────────────────────────────────────────────────
 
@@ -60,42 +63,18 @@ interface AddrSlotEdge {
   ay0: number; ay1: number; sy0: number; sy1: number
 }
 
-// ── Pure helpers ───────────────────────────────────────────────────────────────
-
-function effectivePriorityFee(tx: Transaction, baseFee: bigint): bigint {
-  if (tx.maxPriorityFeePerGas !== undefined) return tx.maxPriorityFeePerGas
-  if (tx.gasPrice !== undefined) return tx.gasPrice > baseFee ? tx.gasPrice - baseFee : 0n
-  return 0n
-}
-
 function txWeight(tx: Transaction, metric: Metric, baseFee: bigint): number {
   if (metric === 'equal') return 1
-  if (metric === 'gas')   return Number(tx.gasUsed ?? tx.gas)
-  if (metric === 'fee') {
-    const gasUsed = Number(tx.gasUsed ?? tx.gas)
-    // For EIP-1559: (baseFee + tip) * gasUsed; for legacy: gasPrice * gasUsed
-    const effectiveGasPrice = tx.maxPriorityFeePerGas !== undefined
-      ? Number(baseFee) + Number(tx.maxPriorityFeePerGas)
-      : tx.gasPrice !== undefined
-        ? Number(tx.gasPrice)
-        : Number(baseFee)
-    return gasUsed * effectiveGasPrice
-  }
+  if (metric === 'gas')   return Number(txGasUsed(tx))
+  if (metric === 'fee')   return Number(totalTxFee(tx, baseFee))
   // 'priority': effective priority fee per gas
   return Number(effectivePriorityFee(tx, baseFee))
 }
 
 function metricLabel(metric: Metric, tx: Transaction, baseFee: bigint): string {
-  if (metric === 'gas') return formatGas(tx.gasUsed ?? tx.gas)
+  if (metric === 'gas') return formatGas(txGasUsed(tx))
   if (metric === 'fee') {
-    const gasUsed = Number(tx.gasUsed ?? tx.gas)
-    const effectiveGasPrice = tx.maxPriorityFeePerGas !== undefined
-      ? Number(baseFee) + Number(tx.maxPriorityFeePerGas)
-      : tx.gasPrice !== undefined
-        ? Number(tx.gasPrice)
-        : Number(baseFee)
-    const totalFeeWei = gasUsed * effectiveGasPrice
-    const gwei = totalFeeWei / 1e9
+    const gwei = Number(totalTxFee(tx, baseFee)) / 1e9
     return gwei >= 1e6 ? `${(gwei / 1e6).toFixed(2)} mGWEI` : `${gwei.toFixed(0)} gwei fee`
   }
   if (metric === 'priority') {
@@ -147,7 +126,7 @@ const MAX_SK_OPTIONS: Array<number | 'all'> = [20, 40, 80, 150, 'all']
 // ── Main component ─────────────────────────────────────────────────────────────
 
 export function BlockStateAccessView({ block, onSelectTx }: { block: Block; onSelectTx?: (hash: string | null) => void }) {
-  const { blockStateCache, startBlockStateTrace, tokenCache, fetchToken } = useStore()
+  const { blockStateCache, startBlockStateTrace, tokenCache } = useStore()
 
   const [metric,       setMetric]      = useState<Metric>('priority')
   const [sortOrder,    setSortOrder]   = useState<SortOrder>('index')
@@ -184,7 +163,9 @@ export function BlockStateAccessView({ block, onSelectTx }: { block: Block; onSe
 
   // ── Data ────────────────────────────────────────────────────────────────────
   const cache = blockStateCache.get(block.number)
-  if (!cache) startBlockStateTrace(block.number)
+  useEffect(() => {
+    if (!cache) startBlockStateTrace(block.number)
+  }, [cache, block.number, startBlockStateTrace])
 
   const progress = cache ? `${cache.done}/${cache.total}` : '0/0'
   const pct      = cache && cache.total > 0 ? cache.done / cache.total : 0
@@ -209,17 +190,9 @@ export function BlockStateAccessView({ block, onSelectTx }: { block: Block; onSe
 
   const isEmpty = topKeys.length === 0
 
-  // ── Address label resolution ─────────────────────────────────────────────────
-  // Fetch token details for unique addresses in topKeys (ERC-20 and ERC-721)
-  useEffect(() => {
-    const seen = new Set<string>()
-    for (const ks of topKeys) {
-      if (!seen.has(ks.addr) && !KNOWN_PROTOCOLS[ks.addr]) {
-        seen.add(ks.addr)
-        fetchToken(ks.addr)
-      }
-    }
-  }, [topKeys, fetchToken])
+  usePrefetchTokenMetadata(
+    topKeys.map((ks) => (!KNOWN_PROTOCOLS[ks.addr] ? ks.addr : null))
+  )
 
   const addrLabelCached = useCallback((addr: string): string => {
     const proto = KNOWN_PROTOCOLS[addr]
@@ -282,10 +255,15 @@ export function BlockStateAccessView({ block, onSelectTx }: { block: Block; onSe
 
   const sortedTxs = useMemo(() => {
     const arr = [...block.transactions]
-    const tip = (tx: Transaction) => tx.maxPriorityFeePerGas !== undefined ? tx.maxPriorityFeePerGas
-      : tx.gasPrice !== undefined ? (tx.gasPrice > block.baseFeePerGas ? tx.gasPrice - block.baseFeePerGas : 0n) : 0n
-    if (sortOrder === 'gas-desc')      arr.sort((a, b) => Number((b.gasUsed ?? b.gas) - (a.gasUsed ?? a.gas)))
-    if (sortOrder === 'priority-desc') arr.sort((a, b) => Number(tip(b) - tip(a)))
+    if (sortOrder === 'gas-desc') {
+      arr.sort((a, b) => compareBigIntDesc(txGasUsed(a), txGasUsed(b)))
+    }
+    if (sortOrder === 'priority-desc') {
+      arr.sort((a, b) => compareBigIntDesc(
+        effectivePriorityFee(a, block.baseFeePerGas),
+        effectivePriorityFee(b, block.baseFeePerGas),
+      ))
+    }
     return arr
   }, [block.transactions, block.baseFeePerGas, sortOrder])
 

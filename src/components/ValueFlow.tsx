@@ -1,4 +1,3 @@
-import { useEffect } from 'react'
 import { TokenFlow, EthFlow, ProtocolEvent } from '../types'
 import { KNOWN_TOKENS, PROTOCOL_COLORS } from '../lib/protocols'
 import { ACTION_COLORS } from '../lib/colorize'
@@ -7,6 +6,7 @@ import { HexTag, TokenBadge } from './HexTag'
 import { useStore } from '../store'
 import { TokenDetails } from '../lib/tokenFetch'
 import { PoolMeta } from '../lib/poolFetch'
+import { usePrefetchPoolMetadata, usePrefetchTokenMetadata } from '../hooks/usePrefetchMetadata'
 
 type ResolvedToken = { symbol: string; decimals: number; color?: string }
 
@@ -21,36 +21,10 @@ function resolveToken(
   return null
 }
 
-// ── Net flow computation ──────────────────────────────────────────────────
-
-interface NetEntry {
-  address: string
-  netIn: bigint
-  netOut: bigint
-}
-
-function computeNetFlows(flows: TokenFlow[], token: string): NetEntry[] {
-  const totals = new Map<string, { in: bigint; out: bigint }>()
-
-  for (const f of flows) {
-    if (f.token !== token) continue
-    if (!totals.has(f.to)) totals.set(f.to, { in: 0n, out: 0n })
-    if (!totals.has(f.from)) totals.set(f.from, { in: 0n, out: 0n })
-    totals.get(f.to)!.in  += f.amount
-    totals.get(f.from)!.out += f.amount
-  }
-
-  return [...totals.entries()].map(([address, v]) => ({
-    address,
-    netIn:  v.in,
-    netOut: v.out,
-  })).sort((a, b) => Number(b.netIn - b.netOut) - Number(a.netIn - a.netOut))
-}
-
 // ── ERC-20 token transfer list ────────────────────────────────────────────
 
 export function TokenFlowList({ flows }: { flows: TokenFlow[] }) {
-  const { tokenCache } = useStore()
+  const { tokenCache, poolCache } = useStore()
   if (flows.length === 0) return null
 
   const byToken = new Map<string, TokenFlow[]>()
@@ -119,23 +93,21 @@ export function EthFlowList({ flows }: { flows: EthFlow[] }) {
 // ── Protocol event pills ──────────────────────────────────────────────────
 
 export function ProtocolEventList({ events, tokenFlows }: { events: ProtocolEvent[]; tokenFlows?: TokenFlow[] }) {
-  const { tokenCache, poolCache, fetchPool, fetchToken } = useStore()
-
-  // Ensure pool metadata is fetched for any LP/Swap events referencing an address-based pool.
-  // Skip bytes32 V4 pool IDs (66 chars: 0x + 64 hex) — they aren't contract addresses.
-  // Also fetch token metadata for V4 swaps (tokenIn/tokenOut stored in extra by the store).
-  useEffect(() => {
-    for (const ev of events) {
+  usePrefetchPoolMetadata(
+    events.map((ev) => {
       const pool = ev.extra?.pool as string | undefined
-      if (pool && pool.length !== 66 && !poolCache.has(pool.toLowerCase())) fetchPool(pool.toLowerCase())
-      if (ev.protocol === 'Uniswap V4' && ev.action === 'Swap') {
-        const tokenIn  = ev.extra?.tokenIn  as string | undefined
-        const tokenOut = ev.extra?.tokenOut as string | undefined
-        if (tokenIn  && !KNOWN_TOKENS[tokenIn]  && !tokenCache.has(tokenIn))  fetchToken(tokenIn)
-        if (tokenOut && !KNOWN_TOKENS[tokenOut] && !tokenCache.has(tokenOut)) fetchToken(tokenOut)
-      }
-    }
-  }, [events, poolCache, fetchPool, fetchToken, tokenCache])
+      return pool && pool.length !== 66 ? pool : null
+    })
+  )
+  usePrefetchTokenMetadata(
+    events.flatMap((ev) => (
+      ev.protocol === 'Uniswap V4' && ev.action === 'Swap'
+        ? [ev.extra?.tokenIn as string | undefined, ev.extra?.tokenOut as string | undefined]
+        : []
+    ))
+  )
+
+  const { tokenCache, poolCache } = useStore()
 
   if (events.length === 0) return null
 

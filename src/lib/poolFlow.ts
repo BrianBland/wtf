@@ -1,4 +1,5 @@
 import { Block } from '../types'
+import { compareBigIntDesc } from './bigintMath'
 
 export interface AddrTokenFlow {
   address: string
@@ -86,6 +87,6 @@ export function computePoolFlows(blocks: Block[], poolAddr: string, token0: stri
 /** Sort and take top N addresses by total flow volume for a token */
 export function topFlows(flowMap: Map<string, AddrTokenFlow>, n: number): AddrTokenFlow[] {
   return [...flowMap.values()]
-    .sort((a, b) => Number((b.amountIn + b.amountOut) - (a.amountIn + a.amountOut)))
+    .sort((a, b) => compareBigIntDesc(a.amountIn + a.amountOut, b.amountIn + b.amountOut))
     .slice(0, n)
 }

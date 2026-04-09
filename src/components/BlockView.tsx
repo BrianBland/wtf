@@ -1,6 +1,7 @@
 import { useMemo, useState, useRef, useEffect } from 'react'
 import { useStore } from '../store'
 import { Block, Transaction, TokenFlow, UserOp } from '../types'
+import { computeParallelization, aggregateKeys } from '../lib/stateAccess'
 import { BlockStateAccessView } from './BlockStateAccessView'
 import { buildHistograms } from '../lib/aggregations'
 import { SortKey } from './Histogram'
@@ -15,12 +16,7 @@ import { CallAggregationsView } from './CallAggregationsView'
 import { DecodedCallView } from './TxView'
 import { KNOWN_TOKENS, KNOWN_PROTOCOLS, KNOWN_SELECTORS } from '../lib/protocols'
 import { formatEth, formatGas, formatGwei, formatTimestamp, formatAge, formatNumber, shortHash } from '../lib/formatters'
-function effectivePriorityFee(tx: import('../types').Transaction, baseFee: bigint): bigint {
-  if (tx.maxPriorityFeePerGas !== undefined) return tx.maxPriorityFeePerGas
-  if (tx.gasPrice !== undefined) return tx.gasPrice > baseFee ? tx.gasPrice - baseFee : 0n
-  return 0n
-}
-import { computeParallelization, aggregateKeys } from '../lib/stateAccess'
+import { effectivePriorityFee, txGasUsed } from '../lib/txMetrics'
 
 // ── DeFi action glyphs ────────────────────────────────────────────────────
 
@@ -281,7 +277,7 @@ function TxRow({ tx, baseFee, selected, onClick }: { tx: Transaction; baseFee: b
   const hasEth    = tx.value > 0n
   const hasTokens = tx.tokenFlows.length > 0
   const hasDefi   = tx.protocols.length > 0
-  const gasUsed   = tx.gasUsed ?? tx.gas
+  const gasUsed   = txGasUsed(tx)
   const tip       = effectivePriorityFee(tx, baseFee)
   const reverted  = tx.reverted === true
   const dimStyle  = reverted ? { opacity: 0.6 } : undefined

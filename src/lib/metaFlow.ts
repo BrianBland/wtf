@@ -1,4 +1,5 @@
 import { Block } from '../types'
+import { compareBigIntDesc } from './bigintMath'
 import { KNOWN_TOKENS } from './protocols'
 
 // ── Value normalization ────────────────────────────────────────────────────
@@ -137,7 +138,7 @@ export function buildMetaFlow(
   }
 
   const topPools = [...poolTotals.entries()]
-    .sort((a, b) => Number(b[1] - a[1]))
+    .sort((a, b) => compareBigIntDesc(a[1], b[1]))
     .slice(0, maxPools)
   const topPoolIds = new Set(topPools.map(([id]) => id))
 
@@ -147,7 +148,7 @@ export function buildMetaFlow(
   /** Sort a token→rawAmt map descending by approximate µUSD value. */
   const sortedOther = (m: Map<string, bigint>) =>
     new Map([...m.entries()].sort((a, b) =>
-      Number(otherToUSDish(b[0], b[1]) - otherToUSDish(a[0], a[1]))))
+      compareBigIntDesc(otherToUSDish(a[0], a[1]), otherToUSDish(b[0], b[1]))))
 
   const sPEdges: MetaEdge[] = []
   const senderTotals = new Map<string, bigint>()
@@ -202,16 +203,16 @@ export function buildMetaFlow(
   }
 
   const topSenderIds = new Set(
-    [...senderTotals.entries()].sort((a, b) => Number(b[1] - a[1])).slice(0, maxSenders).map(([id]) => id)
+    [...senderTotals.entries()].sort((a, b) => compareBigIntDesc(a[1], b[1])).slice(0, maxSenders).map(([id]) => id)
   )
   const topRecipIds = new Set(
-    [...recipTotals.entries()].sort((a, b) => Number(b[1] - a[1])).slice(0, maxRecipients).map(([id]) => id)
+    [...recipTotals.entries()].sort((a, b) => compareBigIntDesc(a[1], b[1])).slice(0, maxRecipients).map(([id]) => id)
   )
 
   return {
-    senders:      [...topSenderIds].map(id => ({ id, totalUSD: senderTotals.get(id) ?? 0n })).sort((a, b) => Number(b.totalUSD - a.totalUSD)),
+    senders:      [...topSenderIds].map(id => ({ id, totalUSD: senderTotals.get(id) ?? 0n })).sort((a, b) => compareBigIntDesc(a.totalUSD, b.totalUSD)),
     pools:        topPools.map(([id, totalUSD]) => ({ id, totalUSD })),
-    recipients:   [...topRecipIds].map(id => ({ id, totalUSD: recipTotals.get(id) ?? 0n })).sort((a, b) => Number(b.totalUSD - a.totalUSD)),
+    recipients:   [...topRecipIds].map(id => ({ id, totalUSD: recipTotals.get(id) ?? 0n })).sort((a, b) => compareBigIntDesc(a.totalUSD, b.totalUSD)),
     senderToPool: sPEdges.filter(e => topSenderIds.has(e.fromId)),
     poolToRecip:  pREdges.filter(e => topRecipIds.has(e.toId)),
   }

@@ -13,6 +13,8 @@ import {
   tokenToUSDish, knownTokenColor,
   SankeyEdge, SankeyBand, SankeyNode, LEdge,
 } from '../lib/sankeyLayout'
+import { usePrefetchTokenMetadata } from '../hooks/usePrefetchMetadata'
+import { compareBigIntDesc } from '../lib/bigintMath'
 
 // ── Layout constants ──────────────────────────────────────────────────────────
 
@@ -117,8 +119,8 @@ function buildPoolSankey(
   }
 
   // Take top N by totalUSD
-  leftEdgesRaw.sort((a, b)  => Number(b.totalUSD - a.totalUSD))
-  rightEdgesRaw.sort((a, b) => Number(b.totalUSD - a.totalUSD))
+  leftEdgesRaw.sort((a, b) => compareBigIntDesc(a.totalUSD, b.totalUSD))
+  rightEdgesRaw.sort((a, b) => compareBigIntDesc(a.totalUSD, b.totalUSD))
   const leftEdges  = leftEdgesRaw.slice(0, MAX_ADDRS)
   const rightEdges = rightEdgesRaw.slice(0, MAX_ADDRS)
 
@@ -129,9 +131,9 @@ function buildPoolSankey(
   for (const e of rightEdges) rightNodeMap.set(e.toId,  (rightNodeMap.get(e.toId)  ?? 0n) + e.totalUSD)
 
   const leftNodes:  SankeyNode[] = [...leftNodeMap.entries()]
-    .sort((a, b) => Number(b[1] - a[1])).map(([id, totalUSD]) => ({ id, totalUSD }))
+    .sort((a, b) => compareBigIntDesc(a[1], b[1])).map(([id, totalUSD]) => ({ id, totalUSD }))
   const rightNodes: SankeyNode[] = [...rightNodeMap.entries()]
-    .sort((a, b) => Number(b[1] - a[1])).map(([id, totalUSD]) => ({ id, totalUSD }))
+    .sort((a, b) => compareBigIntDesc(a[1], b[1])).map(([id, totalUSD]) => ({ id, totalUSD }))
 
   const poolTotal = leftNodes.reduce((s, n) => s + n.totalUSD, 0n)
 
@@ -147,14 +149,11 @@ export function PoolFlowView({
   poolAddr: string
   meta: PoolMeta
 }) {
-  const { tokenCache, fetchToken, ethPriceUSD, btcPriceUSD } = useStore()
+  const { tokenCache, ethPriceUSD, btcPriceUSD } = useStore()
   const [showNet,    setShowNet]    = useState(false)
   const [selectedId, setSelectedId] = useState<string | null>(null)
 
-  useMemo(() => {
-    if (meta.token0) fetchToken(meta.token0)
-    if (meta.token1) fetchToken(meta.token1)
-  }, [meta.token0, meta.token1, fetchToken])
+  usePrefetchTokenMetadata([meta.token0, meta.token1])
 
   const flows = useMemo(
     () => computePoolFlows(blocks, poolAddr, meta.token0, meta.token1),

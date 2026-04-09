@@ -7,6 +7,7 @@ import { hexColors } from '../lib/colorize'
 import { KNOWN_TOKENS, KNOWN_PROTOCOLS, PROTOCOL_COLORS, PROTOCOL_CLASSIFICATION } from '../lib/protocols'
 import { PoolMeta } from '../lib/poolFetch'
 import { PoolFlowView } from './PoolFlowView'
+import { usePrefetchPoolMetadata } from '../hooks/usePrefetchMetadata'
 
 // ── Token pair label ──────────────────────────────────────────────────────
 
@@ -340,23 +341,12 @@ export function ProtocolDrillDown({
   blocks: Block[]
   onSelectTx: (hash: string) => void
 }) {
-  const { poolCache, fetchPool, tokenCache, fetchToken } = useStore()
+  const { poolCache, tokenCache } = useStore()
 
   // Build flat pool activity map
   const flatPools = useMemo(() => buildPoolActivity(blocks), [blocks])
 
-  // Trigger on-demand fetches for all unique pool + token addresses
-  useEffect(() => {
-    for (const addr of flatPools.keys()) fetchPool(addr)
-  }, [flatPools, fetchPool])
-
-  useEffect(() => {
-    for (const meta of poolCache.values()) {
-      if (typeof meta !== 'object') continue
-      if (meta.token0) fetchToken(meta.token0)
-      if (meta.token1) fetchToken(meta.token1)
-    }
-  }, [poolCache, fetchToken])
+  usePrefetchPoolMetadata(flatPools.keys())
 
   // Group by factory-resolved protocol (falls back to event protocol)
   const groups = useMemo(() => {

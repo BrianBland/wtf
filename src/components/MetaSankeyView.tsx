@@ -6,6 +6,7 @@ import { buildMetaFlow, MetaEdge, USDC, WETH, CBBTC } from '../lib/metaFlow'
 import { KNOWN_TOKENS, KNOWN_PROTOCOLS, PROTOCOL_COLORS } from '../lib/protocols'
 import { formatAmount, formatEth, shortAddr } from '../lib/formatters'
 import { keyToHsl } from '../lib/colorize'
+import { usePrefetchPoolMetadata } from '../hooks/usePrefetchMetadata'
 import {
   NODE_W, NODE_GAP, MIN_NODE_H, PAD_Y, TOKEN_COLORS,
   fmtUSD, addrLabel, bandPath, layoutColumn, allocateEdges,
@@ -263,19 +264,10 @@ export function MetaSankeyView({ blocks, targetHeight }: { blocks: Block[]; targ
 
   const poolAddrs = useMemo(() => {
     const poolActivity = buildPoolActivity(blocks)
-    for (const addr of poolActivity.keys()) fetchPool(addr)
     return new Set(poolActivity.keys())
-  }, [blocks, fetchPool])
+  }, [blocks])
 
-  // Trigger token fetches for pool token0/token1 once pool metadata loads
-  useEffect(() => {
-    for (const addr of poolAddrs) {
-      const meta = poolCache.get(addr)
-      if (typeof meta !== 'object') continue
-      if (meta.token0 && !KNOWN_TOKENS[meta.token0] && !tokenCache.has(meta.token0)) fetchToken(meta.token0)
-      if (meta.token1 && !KNOWN_TOKENS[meta.token1] && !tokenCache.has(meta.token1)) fetchToken(meta.token1)
-    }
-  }, [poolAddrs, poolCache, tokenCache, fetchToken])
+  usePrefetchPoolMetadata(poolAddrs)
 
   const graph = useMemo(
     () => buildMetaFlow(filteredBlocks, poolAddrs, { netMode: showNet }),

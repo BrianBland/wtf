@@ -1,10 +1,12 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { hexColors, keyToHsl, contrastColor } from '../lib/colorize'
 import { KNOWN_TOKENS, KNOWN_PROTOCOLS, KNOWN_SELECTORS, KNOWN_TOPICS } from '../lib/protocols'
 import { shortAddr } from '../lib/formatters'
 import { useStore } from '../store'
 import { getCachedSelector, getCachedEventTopic, lookupSelector, lookupEventTopic } from '../lib/fourByte'
 import { sigMatchesCalldata } from '../lib/calldataDecoder'
+import { useCachedLookup } from '../hooks/useCachedLookup'
+import { usePrefetchTokenMetadata } from '../hooks/usePrefetchMetadata'
 
 interface HexTagProps {
   value: string
@@ -70,17 +72,7 @@ export function SelectorTag({ selector, inputHex }: { selector: string | null; i
 }
 
 function DynamicSelectorTag({ selector, inputHex }: { selector: string; inputHex?: string }) {
-  const [resolved, setResolved] = useState<string | null>(
-    () => {
-      const cached = getCachedSelector(selector)
-      return typeof cached === 'string' ? cached : null
-    },
-  )
-
-  useEffect(() => {
-    if (getCachedSelector(selector) !== undefined) return
-    lookupSelector(selector).then((result) => { if (result) setResolved(result) })
-  }, [selector])
+  const resolved = useCachedLookup(selector, getCachedSelector, lookupSelector)
 
   // Validate the resolved signature against actual calldata to reject selector collisions.
   const validSig = resolved && inputHex ? (sigMatchesCalldata(resolved, inputHex) ? resolved : null) : resolved
@@ -105,17 +97,7 @@ export function TopicTag({ topic }: { topic: string }) {
 }
 
 function DynamicTopicTag({ topic }: { topic: string }) {
-  const [resolved, setResolved] = useState<string | null>(
-    () => {
-      const cached = getCachedEventTopic(topic)
-      return typeof cached === 'string' ? cached : null
-    },
-  )
-
-  useEffect(() => {
-    if (getCachedEventTopic(topic) !== undefined) return
-    lookupEventTopic(topic).then((result) => { if (result) setResolved(result) })
-  }, [topic])
+  const resolved = useCachedLookup(topic, getCachedEventTopic, lookupEventTopic)
 
   const name = resolved?.split('(')[0]
   if (name) {
@@ -154,13 +136,8 @@ export function TokenBadge({ address }: { address: string }) {
 }
 
 function DynamicTokenBadge({ address }: { address: string }) {
-  const { fetchToken, getToken, tokenCache } = useStore()
-  const cached = tokenCache.get(address)
-
-  // Trigger fetch on first render if not already in cache
-  useEffect(() => {
-    if (!cached) fetchToken(address)
-  }, [address])
+  const { getToken } = useStore()
+  usePrefetchTokenMetadata([address])
 
   const details = getToken(address)
 

@@ -4,6 +4,7 @@ import { CallTrace } from '../types'
 import { formatGas, hexToBigInt } from '../lib/formatters'
 import { hexColors } from '../lib/colorize'
 import { HexTag, SelectorTag } from './HexTag'
+import { compareBigIntDesc } from '../lib/bigintMath'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -92,7 +93,7 @@ export function CallAggregationsView({
 
   const sorted = useMemo(() => {
     return [...stats].sort((a, b) => {
-      if (sortBy === 'gas')  return Number(b.gasUsed - a.gasUsed)
+      if (sortBy === 'gas')  return compareBigIntDesc(a.gasUsed, b.gasUsed)
       if (sortBy === 'txs')  return b.txCount - a.txCount
       return b.callCount - a.callCount
     })
