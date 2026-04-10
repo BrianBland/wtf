@@ -301,6 +301,12 @@ function readSlot(data: Uint8Array, byteOffset: number): bigint {
   return v
 }
 
+function readSlotNumber(data: Uint8Array, byteOffset: number): number | null {
+  if (byteOffset < 0 || byteOffset + 32 > data.length) return null
+  const value = readSlot(data, byteOffset)
+  return value <= BigInt(Number.MAX_SAFE_INTEGER) ? Number(value) : null
+}
+
 function toHex(bytes: Uint8Array): string {
   return Array.from(bytes).map((b) => b.toString(16).padStart(2, '0')).join('')
 }
@@ -319,6 +325,100 @@ function headSize(type: string, components?: AbiInput[]): number {
     return components.reduce((sum, c) => sum + headSize(c.type, c.components), 0)
   }
   return 32  // all basic static types: uint/int/address/bool/bytesN
+}
+
+function resolveDynamicOffset(data: Uint8Array, headOffset: number, base: number): number | null {
+  const offset = readSlotNumber(data, headOffset)
+  if (offset === null || offset % 32 !== 0) return null
+  const absolute = base + offset
+  return absolute >= base && absolute <= data.length ? absolute : null
+}
+
+function validateValueShape(
+  data: Uint8Array,
+  type: string,
+  components: AbiInput[] | undefined,
+  headOffset: number,
+  base: number,
+): boolean {
+  if (headOffset < 0) return false
+
+  if (
+    type === 'address'
+    || type === 'bool'
+    || type.startsWith('uint')
+    || type.startsWith('int')
+    || (type.startsWith('bytes') && type !== 'bytes')
+  ) {
+    return headOffset + 32 <= data.length
+  }
+
+  if (type === 'bytes' || type === 'string') {
+    const dataPos = resolveDynamicOffset(data, headOffset, base)
+    if (dataPos === null) return false
+    const length = readSlotNumber(data, dataPos)
+    if (length === null) return false
+    const paddedLength = Math.ceil(length / 32) * 32
+    return dataPos + 32 + paddedLength <= data.length
+  }
+
+  if (type === 'tuple' && components) {
+    const tupleBase = isDynamic(type, components)
+      ? resolveDynamicOffset(data, headOffset, base)
+      : headOffset
+    if (tupleBase === null) return false
+
+    let fieldOffset = tupleBase
+    for (const comp of components) {
+      if (!validateValueShape(data, comp.type, comp.components, fieldOffset, tupleBase)) return false
+      fieldOffset += headSize(comp.type, comp.components)
+    }
+    return true
+  }
+
+  if (type.endsWith('[]')) {
+    const elemType = type.slice(0, -2)
+    const elemComponents = elemType === 'tuple' ? components : undefined
+    const arrBase = resolveDynamicOffset(data, headOffset, base)
+    if (arrBase === null || arrBase + 32 > data.length) return false
+
+    const total = readSlotNumber(data, arrBase)
+    if (total === null) return false
+
+    const elemSize = headSize(elemType, elemComponents)
+    const elementsBase = arrBase + 32
+    const headEnd = elementsBase + total * elemSize
+    if (headEnd > data.length) return false
+
+    for (let i = 0; i < total; i++) {
+      const elemOffset = elementsBase + i * elemSize
+      if (!validateValueShape(data, elemType, elemComponents, elemOffset, elementsBase)) return false
+    }
+    return true
+  }
+
+  return false
+}
+
+function isHexInput(input: string): boolean {
+  return /^0x[0-9a-fA-F]*$/.test(input) && input.length % 2 === 0
+}
+
+function validateCallShape(input: string, inputs: AbiInput[]): Uint8Array | null {
+  if (!input || input.length < 10 || !isHexInput(input)) return null
+
+  const data = hexToBytes(input).slice(4)
+  const totalHead = inputs.reduce((sum, inp) => sum + headSize(inp.type, inp.components), 0)
+  if (data.length < totalHead) return null
+  if (inputs.length === 0) return data.length === 0 ? data : null
+
+  let headOffset = 0
+  for (const inp of inputs) {
+    if (!validateValueShape(data, inp.type, inp.components, headOffset, 0)) return null
+    headOffset += headSize(inp.type, inp.components)
+  }
+
+  return data
 }
 
 // ── Core decoder ───────────────────────────────────────────────────────────
@@ -469,25 +569,8 @@ export function decodeCalldataFromSig(input: string, sig: string): DecodedCall |
   const [, name, paramsStr] = m
   try {
     const inputs = parseSigToInputs(paramsStr)
-    const data   = hexToBytes(input).slice(4)
-
-    // Reject if calldata is shorter than the ABI head requires
-    const totalHead = inputs.reduce((sum, inp) => sum + headSize(inp.type, inp.components), 0)
-    if (data.length < totalHead) return null
-
-    // Reject zero-param signatures with trailing calldata — almost certainly a selector collision.
-    if (inputs.length === 0 && data.length > 0) return null
-
-    // Reject if any dynamic offset pointer is out of range.
-    // Valid offsets must point past the head area (>= totalHead) and within data.
-    let headOff = 0
-    for (const inp of inputs) {
-      if (isDynamic(inp.type, inp.components)) {
-        const offset = Number(readSlot(data, headOff))
-        if (offset < totalHead || offset > data.length) return null
-      }
-      headOff += headSize(inp.type, inp.components)
-    }
+    const data = validateCallShape(input, inputs)
+    if (!data) return null
 
     const params: DecodedParam[] = []
     let headOffset = 0
@@ -503,10 +586,11 @@ export function decodeCalldataFromSig(input: string, sig: string): DecodedCall |
 
 export function decodeCalldata(input: string, selector: string): DecodedCall | null {
   const abi = ABI_MAP[selector.toLowerCase()]
-  if (!abi || !input || input.length < 10) return null
+  if (!abi) return null
 
   try {
-    const data = hexToBytes(input).slice(4)  // skip 4-byte selector
+    const data = validateCallShape(input, abi.inputs)
+    if (!data) return null
 
     const params: DecodedParam[] = []
     let headOffset = 0
@@ -524,6 +608,14 @@ export function decodeCalldata(input: string, selector: string): DecodedCall | n
 }
 
 export { ABI_MAP }
+
+export function hasKnownFunctionAbi(selector: string): boolean {
+  return selector.toLowerCase() in ABI_MAP
+}
+
+export function selectorMatchesKnownAbi(selector: string, inputHex: string): boolean {
+  return decodeCalldata(inputHex, selector) !== null
+}
 
 /** Returns true if the text signature is plausibly compatible with the given calldata.
  *  Used to filter out selector-collision false positives from 4byte.directory. */

@@ -2,6 +2,7 @@ import { useMemo, useState, useRef } from 'react'
 import { useStore } from '../store'
 import { Block } from '../types'
 import { buildHistograms, AggMetric } from '../lib/aggregations'
+import { carryBlockFilters } from '../lib/urlState'
 import { Histogram, HistEntry, SortKey } from './Histogram'
 import { ProtocolDrillDown } from './ProtocolDrillDown'
 import { MetaSankeyView } from './MetaSankeyView'
@@ -246,6 +247,7 @@ function ClassifiedProtocolHistogram({ entries, sortBy }: { entries: HistEntry[]
 export function BlockRangeView() {
   const blocksMap = useStore((s) => s.blocks)
   const goto      = useStore((s) => s.goto)
+  const nav       = useStore((s) => s.nav)
   const [sparkMetric, setSparkMetric] = useState<AggMetric>('txs')
   const [sortBy, setSortBy] = useState<SortKey>('txs')
   const [col4, setCol4] = useState<'methods' | 'activity'>('methods')
@@ -260,7 +262,7 @@ export function BlockRangeView() {
     [blocks]
   )
 
-  const handleBlockSelect = (n: number) => goto({ view: 'block', blockNumber: n })
+  const handleBlockSelect = (n: number) => goto(carryBlockFilters(nav, { view: 'block', blockNumber: n }))
 
   if (blocks.length === 0) {
     return (
@@ -396,7 +398,7 @@ export function BlockRangeView() {
                 // Find which block contains this tx and navigate to it
                 for (const b of blocks) {
                   if (b.transactions.some((tx) => tx.hash === hash)) {
-                    goto({ view: 'block', blockNumber: b.number })
+                    goto(carryBlockFilters(nav, { view: 'block', blockNumber: b.number }))
                     return
                   }
                 }

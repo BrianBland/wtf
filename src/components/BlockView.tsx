@@ -1,6 +1,6 @@
 import { useMemo, useState, useRef, useEffect } from 'react'
 import { useStore } from '../store'
-import { Block, Transaction, TokenFlow, UserOp } from '../types'
+import { Block, BlockHistogramFilter, BlockTxFilter, BlockViewFilters, Transaction, TokenFlow, UserOp } from '../types'
 import { computeParallelization, aggregateKeys } from '../lib/stateAccess'
 import { BlockStateAccessView } from './BlockStateAccessView'
 import { buildHistograms } from '../lib/aggregations'
@@ -14,6 +14,7 @@ import { ProtocolDrillDown } from './ProtocolDrillDown'
 import { MetaSankeyView } from './MetaSankeyView'
 import { CallAggregationsView } from './CallAggregationsView'
 import { DecodedCallView } from './TxView'
+import { carryBlockFilters } from '../lib/urlState'
 import { KNOWN_TOKENS, KNOWN_PROTOCOLS, KNOWN_SELECTORS } from '../lib/protocols'
 import { formatEth, formatGas, formatGwei, formatTimestamp, formatAge, formatNumber, shortHash } from '../lib/formatters'
 import { effectivePriorityFee, txGasUsed } from '../lib/txMetrics'
@@ -75,12 +76,12 @@ function ExplorerLink({ hash, type = 'tx', visible = false }: { hash: string; ty
 
 // ── Block nav & header ────────────────────────────────────────────────────
 
-function BlockHeader({ blockNumber }: { blockNumber: number }) {
-  const { blocks, goto, latestBlock } = useStore()
+function BlockHeader({ blockNumber, blockFilters }: { blockNumber: number; blockFilters: BlockViewFilters }) {
+  const { blocks, goto, latestBlock, nav } = useStore()
   const block = blocks.get(blockNumber)
 
-  const goPrev = () => goto({ view: 'block', blockNumber: blockNumber - 1 })
-  const goNext = () => goto({ view: 'block', blockNumber: blockNumber + 1 })
+  const goPrev = () => goto(carryBlockFilters(nav, { view: 'block', blockNumber: blockNumber - 1, blockFilters }))
+  const goNext = () => goto(carryBlockFilters(nav, { view: 'block', blockNumber: blockNumber + 1, blockFilters }))
 
   return (
     <div style={{ flexShrink: 0 }}>
@@ -95,7 +96,11 @@ function BlockHeader({ blockNumber }: { blockNumber: number }) {
           disabled={!blocks.has(blockNumber + 1) && !(latestBlock !== null && blockNumber < latestBlock)}
           onClick={goNext}
         >next →</button>
-        <button className="nav-btn" style={{ marginLeft: 8 }} onClick={() => goto({ view: 'range' })}>↑ range</button>
+        <button
+          className="nav-btn"
+          style={{ marginLeft: 8 }}
+          onClick={() => goto(carryBlockFilters(nav, { view: 'range', blockFilters }))}
+        >↑ range</button>
       </div>
 
       {/* Stats grid */}
@@ -131,11 +136,7 @@ function BlockHeader({ blockNumber }: { blockNumber: number }) {
 
 // ── Inline histograms panel ───────────────────────────────────────────────
 
-interface HistogramFilter {
-  sender:    string | null
-  recipient: string | null
-  selector:  string | null
-}
+type HistogramFilter = BlockHistogramFilter
 
 function BlockHistograms({
   blockNumber, filter, onFilter, sortBy, onSortBy,
@@ -222,7 +223,7 @@ function BlockHistograms({
 
 // ── Transaction row ───────────────────────────────────────────────────────
 
-type TxFilter = 'all' | 'eth' | 'tokens' | 'defi'
+type TxFilter = BlockTxFilter
 
 function TokenFlowBadges({ tokenFlows }: { tokenFlows: TokenFlow[] }) {
   const { tokenCache } = useStore()
@@ -399,7 +400,7 @@ function UserOpRow({ tx, userOp, selected, onClick }: {
 // ── Tx quick-detail panel ─────────────────────────────────────────────────
 
 function TxQuickDetail({ tx, blockNumber }: { tx: Transaction; blockNumber: number }) {
-  const { goto } = useStore()
+  const { goto, nav } = useStore()
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', borderLeft: '1px solid var(--border)' }}>
@@ -410,7 +411,7 @@ function TxQuickDetail({ tx, blockNumber }: { tx: Transaction; blockNumber: numb
         <button
           className="nav-btn"
           style={{ marginLeft: 'auto', color: 'var(--accent)', whiteSpace: 'nowrap' }}
-          onClick={() => goto({ view: 'tx', txHash: tx.hash, blockNumber })}
+          onClick={() => goto(carryBlockFilters(nav, { view: 'tx', txHash: tx.hash, blockNumber }))}
         >Full trace →</button>
       </div>
 
@@ -946,34 +947,26 @@ function TraceStatsBar({ block }: { block: Block }) {
   )
 }
 
-// ── URL filter sync ───────────────────────────────────────────────────────
-
-function readFiltersFromUrl() {
-  const p = new URLSearchParams(window.location.search)
-  const typeParam = p.get('type') ?? ''
-  return {
-    txTypeFilter: (['eth', 'tokens', 'defi'].includes(typeParam) ? typeParam as TxFilter : 'all'),
-    histFilter: {
-      sender:    p.get('from') || null,
-      recipient: p.get('to')   || null,
-      selector:  p.get('sel')  || null,
-    } as HistogramFilter,
-    textFilter: p.get('q') ?? '',
-    sortBy:     (p.get('sort') === 'gas' ? 'gas' : 'txs') as SortKey,
-  }
-}
-
 // ── Main block view ───────────────────────────────────────────────────────
 
-export function BlockView({ blockNumber }: { blockNumber: number }) {
+export function BlockView({
+  blockNumber,
+  filters,
+  onFiltersChange,
+}: {
+  blockNumber: number
+  filters: BlockViewFilters
+  onFiltersChange: (filters: BlockViewFilters) => void
+}) {
   const { blocks, blockLoading, fetchBlock, connected } = useStore()
   const [selectedTx, setSelectedTx] = useState<string | null>(null)
-  const init = readFiltersFromUrl()
-  const [txTypeFilter, setTxTypeFilter] = useState<TxFilter>(init.txTypeFilter)
-  const [histFilter, setHistFilter] = useState<HistogramFilter>(init.histFilter)
-  const [textFilter, setTextFilter] = useState(init.textFilter)
-  const [sortBy, setSortBy] = useState<SortKey>(init.sortBy)
   const txListRef = useRef<HTMLDivElement>(null)
+  const { txTypeFilter, histFilter, textFilter, sortBy } = filters
+
+  const setTxTypeFilter = (next: TxFilter) => onFiltersChange({ ...filters, txTypeFilter: next })
+  const setHistFilter = (next: HistogramFilter) => onFiltersChange({ ...filters, histFilter: next })
+  const setTextFilter = (next: string) => onFiltersChange({ ...filters, textFilter: next })
+  const setSortBy = (next: SortKey) => onFiltersChange({ ...filters, sortBy: next })
 
   // When a tx is selected from the sankey, scroll it into view in the list
   useEffect(() => {
@@ -986,21 +979,6 @@ export function BlockView({ blockNumber }: { blockNumber: number }) {
   useEffect(() => {
     if (!blocks.has(blockNumber) && connected) fetchBlock(blockNumber)
   }, [blockNumber, connected])
-
-  // Sync active filters to URL query params
-  useEffect(() => {
-    const p = new URLSearchParams()
-    if (txTypeFilter !== 'all')   p.set('type', txTypeFilter)
-    if (histFilter.sender)        p.set('from', histFilter.sender)
-    if (histFilter.recipient)     p.set('to',   histFilter.recipient)
-    if (histFilter.selector)      p.set('sel',  histFilter.selector)
-    if (textFilter)               p.set('q',    textFilter)
-    if (sortBy !== 'txs')         p.set('sort', sortBy)
-    const search = p.toString() ? `?${p.toString()}` : ''
-    if (window.location.search !== search) {
-      window.history.replaceState(null, '', `${window.location.pathname}${search}${window.location.hash}`)
-    }
-  }, [txTypeFilter, histFilter, textFilter, sortBy])
 
   const block = blocks.get(blockNumber)
   const loading = blockLoading.has(blockNumber)
@@ -1036,7 +1014,7 @@ export function BlockView({ blockNumber }: { blockNumber: number }) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
       {/* Block nav + stats */}
-      <BlockHeader blockNumber={blockNumber} />
+      <BlockHeader blockNumber={blockNumber} blockFilters={filters} />
 
       {/* Trace-derived stats (parallelization, read-only) */}
       <TraceStatsBar block={block} />

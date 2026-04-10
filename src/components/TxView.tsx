@@ -9,9 +9,19 @@ import {
   formatEth, formatGas, formatNumber, shortAddr,
   hexToBigInt,
 } from '../lib/formatters'
-import { decodeCalldata, decodeCalldataFromSig, decodeLog, EVENT_ABI_MAP, DecodedValue, DecodedParam, DecodedCall } from '../lib/calldataDecoder'
+import {
+  decodeCalldata,
+  decodeCalldataFromSig,
+  decodeLog,
+  EVENT_ABI_MAP,
+  DecodedValue,
+  DecodedParam,
+  DecodedCall,
+  hasKnownFunctionAbi,
+} from '../lib/calldataDecoder'
 import { getCachedSelector, lookupSelector, getCachedEventTopic, lookupEventTopic } from '../lib/fourByte'
 import { useCachedLookup } from '../hooks/useCachedLookup'
+import { carryBlockFilters } from '../lib/urlState'
 
 // ── Decoded calldata view ─────────────────────────────────────────────────
 
@@ -143,7 +153,10 @@ function useResolvedSelectorSignature(selector: string): string | null {
 }
 
 function decodeCallWithFallback(input: string, selector: string, sig: string | null): DecodedCall | null {
-  return decodeCalldata(input, selector) ?? (sig ? decodeCalldataFromSig(input, sig) : null)
+  const decoded = decodeCalldata(input, selector)
+  if (decoded) return decoded
+  if (hasKnownFunctionAbi(selector)) return null
+  return sig ? decodeCalldataFromSig(input, sig) : null
 }
 
 function RawCalldataView({
@@ -361,7 +374,7 @@ function InputCalldataSection({ input, selector }: { input: string; selector: st
 // ── Tx navigation controls ────────────────────────────────────────────────
 
 function TxNav({ txHash, blockNumber }: { txHash: string; blockNumber: number }) {
-  const { blocks, goto } = useStore()
+  const { blocks, goto, nav } = useStore()
   const block = blocks.get(blockNumber)
   if (!block) return null
 
@@ -374,7 +387,7 @@ function TxNav({ txHash, blockNumber }: { txHash: string; blockNumber: number })
       <button
         className="nav-btn"
         disabled={!prev}
-        onClick={() => prev && goto({ view: 'tx', txHash: prev.hash, blockNumber })}
+        onClick={() => prev && goto(carryBlockFilters(nav, { view: 'tx', txHash: prev.hash, blockNumber }))}
       >← prev tx</button>
 
       <div className="nav-label">
@@ -383,7 +396,7 @@ function TxNav({ txHash, blockNumber }: { txHash: string; blockNumber: number })
         <span className="muted"> in </span>
         <button
           style={{ color: 'var(--accent)', fontSize: 11, cursor: 'pointer', background: 'none', border: 'none', padding: 0 }}
-          onClick={() => goto({ view: 'block', blockNumber })}
+          onClick={() => goto(carryBlockFilters(nav, { view: 'block', blockNumber }))}
         >
           #{blockNumber.toLocaleString()}
         </button>
@@ -392,7 +405,7 @@ function TxNav({ txHash, blockNumber }: { txHash: string; blockNumber: number })
       <button
         className="nav-btn"
         disabled={!next}
-        onClick={() => next && goto({ view: 'tx', txHash: next.hash, blockNumber })}
+        onClick={() => next && goto(carryBlockFilters(nav, { view: 'tx', txHash: next.hash, blockNumber }))}
       >next tx →</button>
     </div>
   )

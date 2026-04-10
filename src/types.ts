@@ -142,8 +142,25 @@ export interface CallTrace {
 // UI navigation
 export type ViewType = 'config' | 'range' | 'block' | 'tx'
 
+export interface BlockHistogramFilter {
+  sender: string | null
+  recipient: string | null
+  selector: string | null
+}
+
+export type BlockTxFilter = 'all' | 'eth' | 'tokens' | 'defi'
+export type BlockSortKey = 'txs' | 'gas'
+
+export interface BlockViewFilters {
+  txTypeFilter: BlockTxFilter
+  histFilter: BlockHistogramFilter
+  textFilter: string
+  sortBy: BlockSortKey
+}
+
 export interface NavState {
   view: ViewType
   blockNumber?: number
   txHash?: string
+  blockFilters?: BlockViewFilters
 }

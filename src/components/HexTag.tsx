@@ -4,7 +4,7 @@ import { KNOWN_TOKENS, KNOWN_PROTOCOLS, KNOWN_SELECTORS, KNOWN_TOPICS } from '..
 import { shortAddr } from '../lib/formatters'
 import { useStore } from '../store'
 import { getCachedSelector, getCachedEventTopic, lookupSelector, lookupEventTopic } from '../lib/fourByte'
-import { sigMatchesCalldata } from '../lib/calldataDecoder'
+import { hasKnownFunctionAbi, selectorMatchesKnownAbi, sigMatchesCalldata } from '../lib/calldataDecoder'
 import { useCachedLookup } from '../hooks/useCachedLookup'
 import { usePrefetchTokenMetadata } from '../hooks/usePrefetchMetadata'
 
@@ -66,6 +66,10 @@ export function SelectorTag({ selector, inputHex }: { selector: string | null; i
   if (!selector) return <span className="muted">—</span>
   const known = KNOWN_SELECTORS[selector]
   if (known) {
+    const isCompatible = !inputHex || !hasKnownFunctionAbi(selector) || selectorMatchesKnownAbi(selector, inputHex)
+    if (!isCompatible) {
+      return <HexTag value={selector} type="raw" title={selector} label={selector} />
+    }
     return <HexTag value={selector} type="selector" title={`${selector} → ${known}`} />
   }
   return <DynamicSelectorTag selector={selector} inputHex={inputHex} />
