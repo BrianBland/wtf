@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { hexColors } from '../lib/colorize'
 import { KNOWN_TOKENS, KNOWN_PROTOCOLS, KNOWN_SELECTORS, PROTOCOL_COLORS } from '../lib/protocols'
 import { shortAddr, formatPercent, formatCount, formatGas } from '../lib/formatters'
+import { b20Title, getB20AddressBadgeMetadata } from '../lib/b20'
 import { AggMetric } from '../lib/aggregations'
 
 export interface HistEntry {
@@ -30,6 +31,8 @@ function resolveLabel(key: string, type: HistType): string {
     if (token) return token.symbol
     const proto = KNOWN_PROTOCOLS[addr]
     if (proto) return proto.name
+    const b20 = getB20AddressBadgeMetadata(key)
+    if (b20) return b20.label
     return shortAddr(key)
   }
   if (type === 'selector') {
@@ -65,15 +68,19 @@ export function Histogram({ entries, type = 'address', maxRows = 8, onSelect, se
         const val      = sortBy === 'gas' ? gas : count
         const total    = sortBy === 'gas' ? totalGas : totalCount
         const pct      = val / (maxVal || 1)
-        const bg       = (type === 'other' ? PROTOCOL_COLORS[key] : undefined) ?? hexColors(key).bg
+        const b20      = type === 'address' ? getB20AddressBadgeMetadata(key) : null
+        const bg       = b20?.backgroundColor ?? (type === 'other' ? PROTOCOL_COLORS[key] : undefined) ?? hexColors(key).bg
         const isActive = selectedKey === key
         const label_   = resolveLabel(key, type)
+        const rowTitle = b20
+          ? b20Title(b20, onSelect ? `Click to filter by ${label_}` : undefined)
+          : onSelect ? `Click to filter by ${label_}` : key
 
         return (
           <div
-            className="hist-row"
+            className={`hist-row ${b20 ? `b20-row b20-${b20.type}` : ''}`}
             key={key}
-            title={onSelect ? `Click to filter by ${label_}` : key}
+            title={rowTitle}
             style={{
               cursor: onSelect ? 'pointer' : undefined,
               background: isActive ? 'var(--surface2)' : undefined,
@@ -100,7 +107,8 @@ export function Histogram({ entries, type = 'address', maxRows = 8, onSelect, se
                   fontWeight: isActive ? 700 : undefined,
                   cursor: type === 'address' ? 'copy' : undefined,
                 }}
-                title={type === 'address' ? `${key} (click to copy)` : key}
+                title={type === 'address' ? `${b20?.title ?? key} (click to copy)` : key}
+                aria-label={b20?.title}
                 onClick={type === 'address' ? (e) => copyKey(key, e) : undefined}
               >
                 {copiedKey === key ? '✓ copied' : label_}

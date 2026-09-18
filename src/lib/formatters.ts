@@ -1,6 +1,10 @@
 // Formatting utilities for addresses, values, gas, etc.
 
+import { getB20AddressBadgeMetadata } from './b20'
+
 export function shortAddr(address: string, chars = 4): string {
+  const b20 = getB20AddressBadgeMetadata(address)
+  if (b20) return b20.label
   if (!address || address.length < 10) return address
   return `${address.slice(0, chars + 2)}…${address.slice(-chars)}`
 }
