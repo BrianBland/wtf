@@ -9,10 +9,12 @@ export const FACTORY_PROTOCOLS: Record<string, string> = {
   // Uniswap
   '0x33128a8fc17869897dce68ed026d694621f6fdfd': 'Uniswap V3',
   '0x8909dc15e40173ff4699343b6eb8132c65e18ec6': 'Uniswap V2',
-  // Aerodrome
-  '0x5e7bb104d84c7cb9b682aac2f3d509f5f406809a': 'Aerodrome CL',   // Slipstream (V3-style)
-  '0x420dd381b31aef6683db6b902084cb0ffece40da': 'Aerodrome',       // Classic AMM (V2-style)
-  '0xade65c38cd4849adba595a4323a8c7ddfe89716a': 'Aerodrome',       // V2 Factory (alternate)
+  // Aerodrome (official Slipstream CL factory generations + classic AMM)
+  '0xf8f2eb4940cfe7d13603dddd87f123820fc061ef': 'Aerodrome CL',
+  '0x5e7bb104d84c7cb9b682aac2f3d509f5f406809a': 'Aerodrome CL',
+  '0xade65c38cd4849adba595a4323a8c7ddfe89716a': 'Aerodrome CL',
+  '0x9592cd9b267748cbfbde90ac9f7df3c437a6d51b': 'Aerodrome CL',   // Historical
+  '0x420dd381b31aef6683db6b902084cb0ffece40da': 'Aerodrome',      // Classic AMM (V2-style)
   // PancakeSwap
   '0x0bfbcf9fa4f9c56b0f40a671ad40e0805a091865': 'PancakeSwap V3',
   '0x02a84c1b3bbd7401a5f7fa98a384ebc70bb5749e': 'PancakeSwap V2',
@@ -20,8 +22,11 @@ export const FACTORY_PROTOCOLS: Record<string, string> = {
   '0xc35dadb65012ec5796536bd9864ed8773abc74c4': 'SushiSwap V3',
   '0x71524b4f93c58fcbf659783284e38825f0622859': 'SushiSwap V2',
   // BaseSwap
-  '0xaed85e1d0c7e6e18335b9ea858ce1ab06934eab5': 'BaseSwap V3',
+  '0x38015d05f4fec8afe15d7cc0386a126574e8077b': 'BaseSwap V3',
+  '0xaed85e1d0c7e6e18335b9ea858ce1ab06934eab5': 'BaseSwap V3',   // Historical
   '0xfda619b6d20975be80a10332cd39b9a4b0faa8bb': 'BaseSwap V2',
+  // 9mm
+  '0x7b72c4002ea7c276dd717b96b20f4956c5c904e7': '9mm V3',
   // Alien Base
   '0x0fd83557b2be93617c9c1c1b6fd549401c74558c': 'Alien Base V3',
   // Solidly V3
