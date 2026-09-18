@@ -70,13 +70,14 @@ describe('buildPoolActivity — V4 singleton pool guard', () => {
     assert.deepEqual(pool?.txHashes, [t.hash])
   })
 
-  test('does not withhold volume from ordinary (non-V4) address-keyed pools', () => {
+  test('withholds volume from unresolved ordinary pools rather than using transaction transfers', () => {
     const usdcTransfer: TokenFlow = { token: USDC_ADDRESS, from: '0xa', to: '0xb', amount: 1_000_000n }
     const t = tx({
       tokenFlows: [usdcTransfer],
       protocols: [{ protocol: 'Uniswap V3', action: 'Swap', extra: { pool: V3_POOL } }],
     })
-    const activity = buildPoolActivity([block([t])])
-    assert.equal(activity.get(V3_POOL)?.usdcVolume, 1_000_000n)
+    const pool = buildPoolActivity([block([t])]).get(V3_POOL)
+    assert.equal(pool?.usdcVolume, 0n)
+    assert.equal(pool?.volumeStatus, 'unresolved')
   })
 })

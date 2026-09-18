@@ -183,6 +183,16 @@ function PoolRow({
           {!usdcAmt && wethAmt && (
             <span style={{ fontSize:10, color:'var(--text3)' }}>{wethAmt}Ξ</span>
           )}
+          {pool.volumeStatus !== 'complete' && (
+            <span
+              style={{ fontSize:9, color:'var(--text3)' }}
+              title={pool.volumeStatus === 'unavailable'
+                ? 'Per-pool volume unavailable'
+                : 'Per-pool volume incomplete: swap metadata or event data unresolved'}
+            >
+              {pool.volumeStatus === 'unavailable' ? 'volume unavailable' : 'volume incomplete'}
+            </span>
+          )}
           <span style={{ fontSize:9, color:'var(--text3)', width:8 }}>
             {pool.txHashes.length > 0 ? (expanded ? '▾' : '▸') : ''}
           </span>

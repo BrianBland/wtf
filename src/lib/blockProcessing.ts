@@ -21,6 +21,7 @@ function extractUserOps(
   selector: string,
   poolProtocols: Map<string, string>,
   v4PoolKeys: Map<string, V4PoolKey>,
+  poolMetas: Map<string, PoolMeta>,
 ): UserOp[] | undefined {
   if (!HANDLEOPS_SELECTORS.has(selector)) return undefined
 
@@ -56,7 +57,7 @@ function extractUserOps(
     }
 
     const logSlice = logSlices[i] ?? []
-    const { tokenFlows, protocols } = processLogs(logSlice, null, poolProtocols, v4PoolKeys)
+    const { tokenFlows, protocols } = processLogs(logSlice, null, poolProtocols, v4PoolKeys, poolMetas)
 
     return { index: i, sender, nonce, callData, success, actualGasUsed, tokenFlows, protocols, logs: logSlice }
   })
@@ -78,6 +79,7 @@ export function processBlock(
   rawReceipts: RawReceipt[] | null,
   poolProtocols: Map<string, string> = new Map(),
   v4PoolKeys: Map<string, V4PoolKey> = new Map(),
+  poolMetas: Map<string, PoolMeta> = new Map(),
 ): Block {
   const logsByTx = new Map<string, Log[]>()
   for (const rl of rawLogs) {
@@ -106,7 +108,7 @@ export function processBlock(
     const hash = rawTx.hash.toLowerCase()
     const logs = logsByTx.get(hash) ?? []
     const hint = detectProtocolHint(rawTx.to)
-    const { tokenFlows, protocols } = processLogs(logs, hint, poolProtocols, v4PoolKeys)
+    const { tokenFlows, protocols } = processLogs(logs, hint, poolProtocols, v4PoolKeys, poolMetas)
     const value = hexToBigInt(rawTx.value)
     const gasUsed = gasUsedByTx.get(hash)
     const maxPriorityFeePerGas = rawTx.maxPriorityFeePerGas
@@ -139,7 +141,7 @@ export function processBlock(
       deployments: detectDeployments(logs, rawTx, receiptByTx.get(hash)),
       reverted: revertedTxSet.has(hash) || undefined,
       userOps: methodSelector
-        ? extractUserOps(logs, rawTx.input, methodSelector, poolProtocols, v4PoolKeys)
+        ? extractUserOps(logs, rawTx.input, methodSelector, poolProtocols, v4PoolKeys, poolMetas)
         : undefined,
     }
   })
@@ -188,8 +190,13 @@ export async function loadBlockData(
   const mergedV4PoolKeys = newV4PoolKeys.size > 0
     ? new Map([...v4PoolKeyCache, ...newV4PoolKeys])
     : v4PoolKeyCache
+  // PoolMeta is passed through from the existing fetch/cache path; this layer performs no RPCs.
+  // Its integrity therefore depends on that path rejecting malformed call responses. If no valid
+  // metadata reaches processLogs, token identity is omitted and volume remains explicitly incomplete.
+  const cachedMeta = [...poolCache].filter((entry): entry is [string, PoolMeta] => typeof entry[1] === 'object')
+  const mergedPoolMetas = new Map<string, PoolMeta>([...cachedMeta, ...newMeta])
   return {
-    block: processBlock(raw, logs, rawReceipts, poolProtocols, mergedV4PoolKeys),
+    block: processBlock(raw, logs, rawReceipts, poolProtocols, mergedV4PoolKeys, mergedPoolMetas),
     newMeta,
     newV4PoolKeys,
   }

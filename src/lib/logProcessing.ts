@@ -47,6 +47,51 @@ import { V4PoolKey, normalizeV4Currency, isValidV4SwapLog } from './v4PoolKey'
 
 export type ProtocolHint = 'aerodrome' | 'uniswap-v3' | null
 
+const ADDRESS_WORD_RE = /^0{24}[0-9a-f]{40}$/
+const DATA_WORD_RE = /^[0-9a-f]{64}$/
+
+function eventWords(log: Log, wordCount: number, topicCount: number): string[] | null {
+  if (log.topics.length !== topicCount || !log.topics.slice(1).every(t => /^0x[0-9a-f]{64}$/.test(t))) return null
+  const hex = log.data.startsWith('0x') ? log.data.slice(2).toLowerCase() : ''
+  if (hex.length !== wordCount * 64) return null
+  const words = Array.from({ length: wordCount }, (_, i) => hex.slice(i * 64, (i + 1) * 64))
+  return words.every(word => DATA_WORD_RE.test(word)) ? words : null
+}
+
+function uintFits(word: string, bits: number): boolean {
+  return BigInt(`0x${word}`) < (1n << BigInt(bits))
+}
+
+function intFits(word: string, bits: number): boolean {
+  const value = BigInt(`0x${word}`)
+  const signBit = 1n << BigInt(bits - 1)
+  const mask = (1n << BigInt(bits)) - 1n
+  const low = value & mask
+  const canonical = (low & signBit) === 0n ? low : low | (((1n << 256n) - 1n) ^ mask)
+  return value === canonical
+}
+
+function isCanonicalV3Swap(log: Log, pancake: boolean): boolean {
+  const words = eventWords(log, pancake ? 7 : 5, 3)
+  if (!words || !log.topics.slice(1).every(t => ADDRESS_WORD_RE.test(t.slice(2)))) return false
+  return uintFits(words[2], 160) && uintFits(words[3], 128) && intFits(words[4], 24) &&
+    (!pancake || (uintFits(words[5], 128) && uintFits(words[6], 128)))
+}
+
+function isCanonicalAmmSwap(log: Log): boolean {
+  const words = eventWords(log, 4, 3)
+  return !!words && log.topics.slice(1).every(t => ADDRESS_WORD_RE.test(t.slice(2)))
+}
+
+function verifiedPoolTokens(meta: PoolMeta | undefined): { token0: string; token1: string } | null {
+  if (!meta) return null
+  const token0 = meta.token0.toLowerCase()
+  const token1 = meta.token1.toLowerCase()
+  if (!/^0x[0-9a-f]{40}$/.test(token0) || !/^0x[0-9a-f]{40}$/.test(token1)) return null
+  if (token0 === '0x' + '0'.repeat(40) || token1 === '0x' + '0'.repeat(40) || token0 === token1) return null
+  return { token0, token1 }
+}
+
 export function detectProtocolHint(txTo: string | null): ProtocolHint {
   if (!txTo) return null
   const addr = txTo.toLowerCase()
@@ -119,6 +164,10 @@ export function processLogs(
   hint: ProtocolHint = null,
   poolProtocols: Map<string, string> = new Map(),
   v4PoolKeys: Map<string, V4PoolKey> = new Map(),
+  // This map is enrichment input, not a fallback lookup: callers must supply PoolMeta already
+  // validated by the metadata-fetch pipeline. Without it, swap identity is intentionally omitted
+  // and poolActivity reports incomplete volume rather than consulting transaction transfers.
+  poolMetas: Map<string, PoolMeta> = new Map(),
 ): { tokenFlows: TokenFlow[]; protocols: ProtocolEvent[] } {
   // Hint is used as fallback for pools not in poolProtocols (e.g. factory lookup failed/loading).
   // 'aerodrome' hint → Aerodrome CL / Aerodrome (AMM); 'uniswap-v3' → Uniswap V3; null → Unknown CL/AMM
@@ -230,25 +279,39 @@ export function processLogs(
     }
 
     if (t0 === UNI_V3_SWAP_TOPIC || t0 === PANCAKE_V3_SWAP_TOPIC) {
+      const canonical = isCanonicalV3Swap(log, t0 === PANCAKE_V3_SWAP_TOPIC)
+      const tokens = verifiedPoolTokens(poolMetas.get(log.address))
       protocols.push({
         protocol: poolProto(log.address) ?? clProtocol, action: 'Swap',
         extra: {
-          pool:    log.address,
-          amount0: decodeInt256(log.data, 0).toString(),
-          amount1: decodeInt256(log.data, 1).toString(),
+          pool: log.address,
+          swapType: 'v3',
+          volumeDataValid: canonical,
+          ...(canonical ? {
+            amount0: decodeInt256(log.data, 0).toString(),
+            amount1: decodeInt256(log.data, 1).toString(),
+          } : {}),
+          ...(tokens ?? {}),
         },
       })
     }
 
     if (t0 === AMM_SWAP_TOPIC || t0 === AERODROME_AMM_SWAP_TOPIC) {
+      const canonical = isCanonicalAmmSwap(log)
+      const tokens = verifiedPoolTokens(poolMetas.get(log.address))
       protocols.push({
         protocol: poolProto(log.address) ?? ammProtocol, action: 'Swap',
         extra: {
-          pool:       log.address,
-          amount0In:  decodeUint256(log.data, 0).toString(),
-          amount1In:  decodeUint256(log.data, 1).toString(),
-          amount0Out: decodeUint256(log.data, 2).toString(),
-          amount1Out: decodeUint256(log.data, 3).toString(),
+          pool: log.address,
+          swapType: 'v2',
+          volumeDataValid: canonical,
+          ...(canonical ? {
+            amount0In: decodeUint256(log.data, 0).toString(),
+            amount1In: decodeUint256(log.data, 1).toString(),
+            amount0Out: decodeUint256(log.data, 2).toString(),
+            amount1Out: decodeUint256(log.data, 3).toString(),
+          } : {}),
+          ...(tokens ?? {}),
         },
       })
     }

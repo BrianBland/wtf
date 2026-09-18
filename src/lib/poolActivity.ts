@@ -1,6 +1,8 @@
-import { Block, TokenFlow } from '../types'
+import { Block, ProtocolEvent } from '../types'
 import { USDC_ADDRESS, WETH_ADDRESS, USDT_ADDRESS } from './protocols'
 import { isV4PoolId } from './v4PoolKey'
+
+export type VolumeStatus = 'complete' | 'unresolved' | 'unavailable'
 
 export interface PoolSummary {
   pool:           string
@@ -12,10 +14,97 @@ export interface PoolSummary {
   txHashes:       string[]      // unique, capped at 200
   usdcVolume:     bigint
   wethVolume:     bigint
+  volumeStatus:   VolumeStatus
 }
 
-function grossTokenVolume(flows: TokenFlow[], token: string): bigint {
-  return flows.reduce((s, f) => f.token === token ? s + f.amount : s, 0n)
+interface SwapVolume {
+  usdc: bigint
+  weth: bigint
+}
+
+const STABLES = new Set([USDC_ADDRESS, USDT_ADDRESS])
+const UINT256_MAX = (1n << 256n) - 1n
+const INT256_MIN = -(1n << 255n)
+const INT256_MAX = (1n << 255n) - 1n
+
+function parseInteger(value: unknown, signed: boolean): bigint | null {
+  if (typeof value !== 'string') return null
+  const pattern = signed ? /^-?(?:0|[1-9][0-9]*)$/ : /^(?:0|[1-9][0-9]*)$/
+  if (!pattern.test(value) || value === '-0') return null
+  const parsed = BigInt(value)
+  if (signed && (parsed < INT256_MIN || parsed > INT256_MAX)) return null
+  if (!signed && parsed > UINT256_MAX) return null
+  return parsed
+}
+
+function parseTokens(extra: Record<string, unknown>): [string, string] | null {
+  if (typeof extra.token0 !== 'string' || typeof extra.token1 !== 'string') return null
+  const token0 = extra.token0.toLowerCase()
+  const token1 = extra.token1.toLowerCase()
+  if (!/^0x[0-9a-f]{40}$/.test(token0) || !/^0x[0-9a-f]{40}$/.test(token1)) return null
+  if (token0 === '0x' + '0'.repeat(40) || token1 === '0x' + '0'.repeat(40) || token0 === token1) return null
+  return [token0, token1]
+}
+
+function trackedVolume(
+  tokens: [string, string],
+  amounts: [bigint, bigint],
+  inputIndex: 0 | 1,
+): SwapVolume {
+  const stable0 = STABLES.has(tokens[0])
+  const stable1 = STABLES.has(tokens[1])
+  let usdc = 0n
+  if (stable0 && stable1) usdc = amounts[inputIndex]
+  else if (stable0) usdc = amounts[0]
+  else if (stable1) usdc = amounts[1]
+
+  let weth = 0n
+  if (tokens[0] === WETH_ADDRESS) weth = amounts[0]
+  else if (tokens[1] === WETH_ADDRESS) weth = amounts[1]
+  return { usdc, weth }
+}
+
+function swapEventVolume(event: ProtocolEvent): SwapVolume | null {
+  const extra = event.extra
+  if (!extra || extra.volumeDataValid !== true) return null
+  const tokens = parseTokens(extra)
+  if (!tokens) return null
+
+  if (extra.swapType === 'v3') {
+    const amount0 = parseInteger(extra.amount0, true)
+    const amount1 = parseInteger(extra.amount1, true)
+    if (amount0 === null || amount1 === null) return null
+    // Canonical V3 pool deltas have exactly one positive (the pool input) and one negative side.
+    if (!((amount0 > 0n && amount1 < 0n) || (amount1 > 0n && amount0 < 0n))) return null
+    return trackedVolume(
+      tokens,
+      [amount0 < 0n ? -amount0 : amount0, amount1 < 0n ? -amount1 : amount1],
+      amount0 > 0n ? 0 : 1,
+    )
+  }
+
+  if (extra.swapType === 'v2') {
+    const amount0In = parseInteger(extra.amount0In, false)
+    const amount1In = parseInteger(extra.amount1In, false)
+    const amount0Out = parseInteger(extra.amount0Out, false)
+    const amount1Out = parseInteger(extra.amount1Out, false)
+    if (amount0In === null || amount1In === null || amount0Out === null || amount1Out === null) return null
+
+    const input0 = amount0In > 0n
+    const input1 = amount1In > 0n
+    const output0 = amount0Out > 0n
+    const output1 = amount1Out > 0n
+    // Ordinary V2/Aerodrome swaps have one input and the opposite output. Ambiguous flash-swap
+    // slot combinations are intentionally withheld instead of guessed.
+    if (input0 === input1 || output0 === output1 || input0 === output0) return null
+    return trackedVolume(
+      tokens,
+      [input0 ? amount0In : amount0Out, input1 ? amount1In : amount1Out],
+      input0 ? 0 : 1,
+    )
+  }
+
+  return null
 }
 
 /** Build a flat pool → activity map across one or more blocks. */
@@ -27,6 +116,7 @@ export function buildPoolActivity(blocks: Block[]): Map<string, PoolSummary> {
       pools.set(addr, {
         pool: addr, eventProtocols: new Set(), swaps: 0,
         lpAdds: 0, lpRemoves: 0, fees: 0, txHashes: [], usdcVolume: 0n, wethVolume: 0n,
+        volumeStatus: isV4PoolId(addr) ? 'unavailable' : 'complete',
       })
     }
     return pools.get(addr)!
@@ -34,13 +124,10 @@ export function buildPoolActivity(blocks: Block[]): Map<string, PoolSummary> {
 
   for (const block of blocks) {
     for (const tx of block.transactions) {
-      const usdcVol = grossTokenVolume(tx.tokenFlows, USDC_ADDRESS)
-                    + grossTokenVolume(tx.tokenFlows, USDT_ADDRESS)
-      const wethVol = grossTokenVolume(tx.tokenFlows, WETH_ADDRESS)
-      const credited = new Set<string>()
-
       for (const ev of tx.protocols) {
-        const addr = (ev.extra?.pool as string | undefined)?.toLowerCase()
+        const rawPool = ev.extra?.pool
+        if (typeof rawPool !== 'string') continue
+        const addr = rawPool.toLowerCase()
         if (!addr) continue
 
         const pool = getPool(addr)
@@ -50,17 +137,18 @@ export function buildPoolActivity(blocks: Block[]): Map<string, PoolSummary> {
           pool.txHashes.push(tx.hash)
         }
 
-        // Credit volume once per (pool, tx) pair. V4 pools are excluded: every V4 pool
-        // shares the singleton PoolManager address as its transfer endpoint, so tx-wide
-        // USDC/WETH transfer totals are not attributable to any single PoolId — crediting
-        // them here would give every V4 pool in the tx the full transaction-wide volume.
-        if (!isV4PoolId(addr) && !credited.has(addr)) {
-          credited.add(addr)
-          pool.usdcVolume += usdcVol
-          pool.wethVolume += wethVol
+        if (ev.action === 'Swap') {
+          pool.swaps++
+          if (!isV4PoolId(addr)) {
+            const volume = swapEventVolume(ev)
+            if (volume) {
+              pool.usdcVolume += volume.usdc
+              pool.wethVolume += volume.weth
+            } else {
+              pool.volumeStatus = 'unresolved'
+            }
+          }
         }
-
-        if (ev.action === 'Swap')            pool.swaps++
         if (ev.action === 'AddLiquidity')    pool.lpAdds++
         if (ev.action === 'RemoveLiquidity') pool.lpRemoves++
         if (ev.action === 'CollectFees')     pool.fees++
