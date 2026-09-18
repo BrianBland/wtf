@@ -6,6 +6,7 @@ import { shortAddr, formatAmount, formatEth } from '../lib/formatters'
 import { hexColors } from '../lib/colorize'
 import { KNOWN_TOKENS, KNOWN_PROTOCOLS, PROTOCOL_COLORS, PROTOCOL_CLASSIFICATION } from '../lib/protocols'
 import { PoolMeta } from '../lib/poolFetch'
+import { isV4PoolId } from '../lib/v4PoolKey'
 import { PoolFlowView } from './PoolFlowView'
 import { usePrefetchPoolMetadata } from '../hooks/usePrefetchMetadata'
 
@@ -100,6 +101,9 @@ function PoolRow({
 }) {
   const { bg } = hexColors(pool.pool)
   const knownName  = KNOWN_PROTOCOLS[pool.pool]?.name
+  // V4 PoolIds are singleton identities (manager + PoolId), not contract addresses —
+  // label clearly rather than showing a bare hex string indistinguishable from an address.
+  const v4Fallback = isV4PoolId(pool.pool) ? `V4 Pool ${shortAddr(pool.pool, 4)}` : shortAddr(pool.pool, 4)
   const usdcAmt = pool.usdcVolume > 0n ? formatAmount(pool.usdcVolume, 6, 0) : null
   const wethAmt = pool.wethVolume > 0n ? formatEth(pool.wethVolume, 3) : null
   const hasActivity = pool.swaps + pool.lpAdds + pool.lpRemoves > 0
@@ -125,7 +129,7 @@ function PoolRow({
           title={pool.pool}>
           {poolMeta
             ? <PairLabel meta={poolMeta} tokenCache={tokenCache} />
-            : (knownName ?? shortAddr(pool.pool, 4))}
+            : (knownName ?? v4Fallback)}
         </span>
         {poolMeta && (
           <span className="muted" style={{ fontSize: 9, flexShrink: 0, cursor: 'copy' }}
@@ -168,8 +172,13 @@ function PoolRow({
 
       {expanded && (
         <div style={{ background: 'var(--surface2)', borderBottom: '1px solid var(--border)' }}>
+          {isV4PoolId(pool.pool) && (
+            <div className="muted" style={{ padding: '4px 20px', fontSize: 10 }}>
+              Per-pool settlement flows and volumes unavailable with V4 singleton netting.
+            </div>
+          )}
           {/* Flow visualization */}
-          {poolMeta && poolMeta.token0 && poolMeta.token1 && (
+          {!isV4PoolId(pool.pool) && poolMeta && poolMeta.token0 && poolMeta.token1 && (
             <PoolFlowView blocks={blocks} poolAddr={pool.pool} meta={poolMeta} />
           )}
 

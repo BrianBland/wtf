@@ -1,5 +1,6 @@
 import { Block, TokenFlow } from '../types'
 import { USDC_ADDRESS, WETH_ADDRESS, USDT_ADDRESS } from './protocols'
+import { isV4PoolId } from './v4PoolKey'
 
 export interface PoolSummary {
   pool:           string
@@ -49,8 +50,11 @@ export function buildPoolActivity(blocks: Block[]): Map<string, PoolSummary> {
           pool.txHashes.push(tx.hash)
         }
 
-        // Credit volume once per (pool, tx) pair
-        if (!credited.has(addr)) {
+        // Credit volume once per (pool, tx) pair. V4 pools are excluded: every V4 pool
+        // shares the singleton PoolManager address as its transfer endpoint, so tx-wide
+        // USDC/WETH transfer totals are not attributable to any single PoolId — crediting
+        // them here would give every V4 pool in the tx the full transaction-wide volume.
+        if (!isV4PoolId(addr) && !credited.has(addr)) {
           credited.add(addr)
           pool.usdcVolume += usdcVol
           pool.wethVolume += wethVol

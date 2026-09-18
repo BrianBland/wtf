@@ -25,7 +25,6 @@ import {
   L2_DEPOSIT_FINALIZED_TOPIC, L2_WITHDRAWAL_INITIATED_TOPIC,
   ACROSS_FUNDS_DEPOSITED_TOPIC, ACROSS_FILLED_RELAY_TOPIC,
   STARGATE_OFT_SENT_TOPIC, STARGATE_OFT_RECEIVED_TOPIC,
-  UNI_V4_SWAP_TOPIC, UNI_V4_POOL_MANAGER_ADDRESS,
   CCTP_DEPOSIT_FOR_BURN_TOPIC, CCTP_MINT_AND_WITHDRAW_TOPIC, CCTP_V1_TOKEN_MESSENGER_ADDRESS,
   CCTP_DOMAIN_NAMES,
   CCIP_SEND_REQUESTED_TOPIC, CCIP_EXECUTION_STATE_CHANGED_TOPIC,
@@ -44,6 +43,7 @@ import {
   topicToAddress, decodeUint256, decodeInt256, decodeAddress,
 } from './formatters'
 import { RpcClient } from './rpc'
+import { V4PoolKey, normalizeV4Currency, isValidV4SwapLog } from './v4PoolKey'
 
 export type ProtocolHint = 'aerodrome' | 'uniswap-v3' | null
 
@@ -118,6 +118,7 @@ export function processLogs(
   logs: Log[],
   hint: ProtocolHint = null,
   poolProtocols: Map<string, string> = new Map(),
+  v4PoolKeys: Map<string, V4PoolKey> = new Map(),
 ): { tokenFlows: TokenFlow[]; protocols: ProtocolEvent[] } {
   // Hint is used as fallback for pools not in poolProtocols (e.g. factory lookup failed/loading).
   // 'aerodrome' hint → Aerodrome CL / Aerodrome (AMM); 'uniswap-v3' → Uniswap V3; null → Unknown CL/AMM
@@ -409,7 +410,7 @@ export function processLogs(
       protocols.push({ protocol: '0x Protocol', action: 'Swap' })
     }
 
-    if (t0 === UNI_V4_SWAP_TOPIC && log.address === UNI_V4_POOL_MANAGER_ADDRESS) {
+    if (isValidV4SwapLog(log)) {
       protocols.push({
         protocol: 'Uniswap V4', action: 'Swap',
         extra: {
@@ -693,33 +694,44 @@ export function processLogs(
     }
   })
 
-  const hasV4Swaps = protocols.some(ev => ev.protocol === 'Uniswap V4' && ev.action === 'Swap')
-  if (hasV4Swaps) {
-    const pmAddr = UNI_V4_POOL_MANAGER_ADDRESS
-    const pmIn  = tokenFlows.filter(f => f.to === pmAddr)
-    const pmOut = tokenFlows.filter(f => f.from === pmAddr)
-    for (const ev of protocols) {
-      if (ev.protocol !== 'Uniswap V4' || ev.action !== 'Swap' || !ev.extra) continue
-      const a0 = BigInt(ev.extra.amount0 as string)
-      const a1 = BigInt(ev.extra.amount1 as string)
-      let inFlow
-      let outFlow
-      if (a0 > 0n) {
-        inFlow = pmIn.find(f => f.amount === a0) ?? pmIn[0]
-        outFlow = pmOut.find(f => f.amount === -a1) ?? pmOut[0]
-      } else {
-        inFlow = pmIn.find(f => f.amount === a1) ?? pmIn[0]
-        outFlow = pmOut.find(f => f.amount === -a0) ?? pmOut[0]
-      }
-      if (inFlow) {
-        ev.extra.tokenIn = inFlow.token
-        ev.extra.amountIn = inFlow.amount.toString()
-      }
-      if (outFlow) {
-        ev.extra.tokenOut = outFlow.token
-        ev.extra.amountOut = outFlow.amount.toString()
-      }
+  // V4 swaps carry no address-based identity of their own — every pool shares the
+  // singleton PoolManager address. Resolve currencies strictly from a verified PoolKey
+  // (Initialize events / PositionManager poolKeys()); never guess from unrelated
+  // transaction-wide PoolManager token transfers (a v4 pool's real settlement can
+  // legitimately have zero, one, or many ERC-20 transfers, or none for native ETH).
+  //
+  // V4 Swap event deltas are swapper-perspective (negative = paid in, positive =
+  // received) — the opposite convention from the V3 Swap event's pool-perspective
+  // deltas (positive = into pool) handled elsewhere in this function.
+  for (const ev of protocols) {
+    if (ev.protocol !== 'Uniswap V4' || ev.action !== 'Swap' || !ev.extra) continue
+    const poolId = (ev.extra.pool as string).toLowerCase()
+    const key = v4PoolKeys.get(poolId)
+    if (!key) continue // unresolved pool — preserve raw deltas/poolId only, no fabricated currency/amount
+
+    const currency0 = normalizeV4Currency(key.currency0)
+    const currency1 = normalizeV4Currency(key.currency1)
+    ev.extra.currency0 = currency0
+    ev.extra.currency1 = currency1
+    ev.extra.poolFee = key.fee
+    ev.extra.tickSpacing = key.tickSpacing
+    ev.extra.hooks = key.hooks
+
+    const a0 = BigInt(ev.extra.amount0 as string)
+    const a1 = BigInt(ev.extra.amount1 as string)
+    if (a0 < 0n && a1 > 0n) {
+      ev.extra.tokenIn = currency0
+      ev.extra.amountIn = (-a0).toString()
+      ev.extra.tokenOut = currency1
+      ev.extra.amountOut = a1.toString()
+    } else if (a1 < 0n && a0 > 0n) {
+      ev.extra.tokenIn = currency1
+      ev.extra.amountIn = (-a1).toString()
+      ev.extra.tokenOut = currency0
+      ev.extra.amountOut = a0.toString()
     }
+    // else: zero-delta or ambiguous same-sign deltas — leave tokenIn/tokenOut unset
+    // rather than fabricate a settlement that didn't happen.
   }
 
   return { tokenFlows, protocols }
