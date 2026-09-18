@@ -179,7 +179,7 @@ export async function loadBlockData(
 
   const logs = rawLogs ?? []
   const [{ protocols: poolProtocols, newMeta }, newV4PoolKeys] = await Promise.all([
-    fetchV3PoolProtocols(client, logs, poolCache),
+    fetchV3PoolProtocols(client, logs, poolCache, hexN),
     // Pin the PositionManager poolKeys() fallback to this block when practical.
     resolveV4PoolKeys(client, logs, v4PoolKeyCache, hexN),
   ])

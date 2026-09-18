@@ -83,6 +83,7 @@ function txActionSummary(
 function PoolRow({
   pool,
   poolMeta,
+  metadataError,
   tokenCache,
   txMap,
   blocks,
@@ -92,6 +93,7 @@ function PoolRow({
 }: {
   pool: PoolSummary
   poolMeta?: PoolMeta
+  metadataError: boolean
   tokenCache: Store['tokenCache']
   txMap: Map<string, Transaction>
   blocks: Block[]
@@ -100,6 +102,7 @@ function PoolRow({
   onToggle: () => void
 }) {
   const { bg } = hexColors(pool.pool)
+  const fetchPool = useStore((state) => state.fetchPool)
   const knownName  = KNOWN_PROTOCOLS[pool.pool]?.name
   // V4 PoolIds are singleton identities (manager + PoolId), not contract addresses —
   // label clearly rather than showing a bare hex string indistinguishable from an address.
@@ -113,6 +116,10 @@ function PoolRow({
     navigator.clipboard.writeText(pool.pool)
     setCopied(true)
     setTimeout(() => setCopied(false), 1200)
+  }
+  const retryMetadata = (e: React.MouseEvent<HTMLButtonElement>) => {
+    e.stopPropagation()
+    fetchPool(pool.pool)
   }
 
   return (
@@ -136,6 +143,18 @@ function PoolRow({
             title={`${pool.pool} (click to copy)`} onClick={copyAddr}>
             {copied ? '✓' : shortAddr(pool.pool, 3)}
           </span>
+        )}
+        {metadataError && !isV4PoolId(pool.pool) && (
+          <button
+            type="button"
+            className="badge"
+            aria-label={`Retry metadata for ${pool.pool}`}
+            title="Retry pool metadata"
+            style={{ border: 'none', cursor: 'pointer', fontSize: 9, flexShrink: 0 }}
+            onClick={retryMetadata}
+          >
+            Retry metadata
+          </button>
         )}
 
         {/* Action counts */}
@@ -272,6 +291,7 @@ function ProtocolSection({
             key={pool.pool}
             pool={pool}
             poolMeta={poolMeta}
+            metadataError={meta === 'error'}
             tokenCache={tokenCache}
             txMap={txMap}
             blocks={blocks}

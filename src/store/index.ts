@@ -112,6 +112,11 @@ type StoreSet = (partial:
 type CacheKey = 'tokenCache' | 'poolCache'
 type CacheValue<K extends CacheKey> = K extends 'tokenCache' ? TokenDetails : PoolMeta
 
+const metadataRequestOwners: Record<CacheKey, Map<string, symbol>> = {
+  tokenCache: new Map(),
+  poolCache: new Map(),
+}
+
 const RPC_STORAGE_KEY = 'wtf_rpc_url'
 const DEFAULT_RPC_URL = 'wss://base.drpc.org'
 let activeConnectionEpoch = 0
@@ -156,21 +161,35 @@ function fetchCachedMetadata<K extends CacheKey>(
   cacheKey: K,
   address: string,
   load: (client: RpcClient, address: string) => Promise<CacheValue<K>>,
+  retryError = false,
 ) {
   const state = get()
   const cache = state[cacheKey] as Map<string, CacheValue<K> | 'loading' | 'error'>
-  if (!state.client || cache.has(address)) return
+  const cached = cache.get(address)
+  if (!state.client || (cached !== undefined && !(retryError && cached === 'error'))) return
 
   const { client } = state
+  const requestOwner = Symbol(address)
+  metadataRequestOwners[cacheKey].set(address, requestOwner)
   set((current) => updateCacheEntry(current, cacheKey, address, 'loading'))
 
-  load(client, address)
-    .then((value) => {
-      set((current) => updateCacheEntry(current, cacheKey, address, value))
+  const commit = (value: CacheValue<K> | 'error') => {
+    set((current) => {
+      const currentCache = current[cacheKey] as Map<string, CacheValue<K> | 'loading' | 'error'>
+      const stillOwnsRequest = metadataRequestOwners[cacheKey].get(address) === requestOwner
+      if (current.client !== client || !stillOwnsRequest || currentCache.get(address) !== 'loading') {
+        if (stillOwnsRequest) metadataRequestOwners[cacheKey].delete(address)
+        return {}
+      }
+      metadataRequestOwners[cacheKey].delete(address)
+      return updateCacheEntry(current, cacheKey, address, value)
     })
-    .catch(() => {
-      set((current) => updateCacheEntry(current, cacheKey, address, 'error'))
-    })
+  }
+
+  void load(client, address).then(
+    (value) => commit(value),
+    () => commit('error'),
+  )
 }
 
 function updateBlockStateProgress(
@@ -460,7 +479,9 @@ export const useStore = create<Store>((set, get) => ({
   poolCache: new Map(),
 
   fetchPool: (address) => {
-    fetchCachedMetadata(get, set, 'poolCache', address, fetchPoolMeta)
+    // An explicit request may retry an error; the prefetch hook does not call this for
+    // existing entries, avoiding a render-driven retry loop.
+    fetchCachedMetadata(get, set, 'poolCache', address, fetchPoolMeta, true)
   },
 
   getPool: (address) => {
