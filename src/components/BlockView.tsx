@@ -9,6 +9,7 @@ import { Histogram } from './Histogram'
 import { HexTag, SelectorTag } from './HexTag'
 import { CollapsibleList } from './CollapsibleList'
 import { ProtocolEventList, TokenFlowList, EthFlowList } from './ValueFlow'
+import { DeploymentList } from './DeploymentList'
 import { AccountActivity } from './AccountActivity'
 import { ProtocolDrillDown } from './ProtocolDrillDown'
 import { MetaSankeyView } from './MetaSankeyView'
@@ -289,6 +290,8 @@ function TxRow({ tx, baseFee, selected, onClick }: { tx: Transaction; baseFee: b
   const gasUsed   = txGasUsed(tx)
   const tip       = effectivePriorityFee(tx, baseFee)
   const reverted  = tx.reverted === true
+  const createdContract = tx.deployments.find((deployment) => deployment.kind === 'contract')
+  const b20DeploymentCount = tx.deployments.filter((deployment) => deployment.kind === 'b20').length
   const dimStyle  = reverted ? { opacity: 0.6 } : undefined
 
   return (
@@ -310,9 +313,18 @@ function TxRow({ tx, baseFee, selected, onClick }: { tx: Transaction; baseFee: b
         <span className="flow-arrow" style={{ flexShrink: 0 }}>→</span>
         {tx.to
           ? <><HexTag value={tx.to} type="address" /><ExplorerLink hash={tx.to} type="address" /></>
-          : <span className="badge muted">deploy</span>}
+          : createdContract
+            ? <><HexTag value={createdContract.address} type="address" /><ExplorerLink hash={createdContract.address} type="address" /></>
+            : <span className={`badge ${reverted ? 'red' : 'muted'}`}>
+                {reverted ? 'deploy failed' : 'deploy unconfirmed'}
+              </span>}
         <span className="muted" style={{ fontSize: 9, flexShrink: 0 }}>·</span>
         <SelectorTag selector={tx.methodSelector} inputHex={tx.input} />
+        {b20DeploymentCount > 0 && (
+          <span className="badge muted" style={{ flexShrink: 0 }}>
+            B20 created{b20DeploymentCount > 1 ? ` ×${b20DeploymentCount}` : ''}
+          </span>
+        )}
       </div>
 
       {/* Token assets */}
@@ -409,6 +421,7 @@ function UserOpRow({ tx, userOp, selected, onClick }: {
 
 function TxQuickDetail({ tx, blockNumber }: { tx: Transaction; blockNumber: number }) {
   const { goto, nav } = useStore()
+  const createdContract = tx.deployments.find((deployment) => deployment.kind === 'contract')
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', borderLeft: '1px solid var(--border)' }}>
@@ -431,12 +444,23 @@ function TxQuickDetail({ tx, blockNumber }: { tx: Transaction; blockNumber: numb
             <HexTag value={tx.from} type="address" />
             <ExplorerLink hash={tx.from} type="address" visible />
           </div>
-          {tx.to && (
+          {tx.to ? (
             <div className="flex-center gap4" style={{ fontSize: 11 }}>
               <span className="muted" style={{ minWidth: 28, fontSize: 10 }}>to</span>
               <HexTag value={tx.to} type="address" />
               <ExplorerLink hash={tx.to} type="address" visible />
               {KNOWN_PROTOCOLS[tx.to] && <span className="badge muted">{KNOWN_PROTOCOLS[tx.to].name}</span>}
+            </div>
+          ) : (
+            <div className="flex-center gap4" style={{ fontSize: 11 }}>
+              <span className="muted" style={{ minWidth: 28, fontSize: 10 }}>{createdContract ? 'new' : 'to'}</span>
+              {createdContract ? (
+                <><HexTag value={createdContract.address} type="address" /><ExplorerLink hash={createdContract.address} type="address" visible /></>
+              ) : (
+                <span className={`badge ${tx.reverted ? 'red' : 'muted'}`}>
+                  {tx.reverted ? 'contract creation failed' : 'contract creation unconfirmed'}
+                </span>
+              )}
             </div>
           )}
           {tx.value > 0n && (
@@ -484,6 +508,14 @@ function TxQuickDetail({ tx, blockNumber }: { tx: Transaction; blockNumber: numb
           </section>
         )}
 
+        {/* Deployments are separate from protocol activity. */}
+        {tx.deployments.length > 0 && (
+          <section>
+            <div className="panel-header" style={{ fontSize: 10 }}>Deployments ({tx.deployments.length})</div>
+            <DeploymentList deployments={tx.deployments} />
+          </section>
+        )}
+
         {/* Protocol events */}
         {tx.protocols.length > 0 && (
           <section>
@@ -528,7 +560,7 @@ function TxQuickDetail({ tx, blockNumber }: { tx: Transaction; blockNumber: numb
           </section>
         )}
 
-        {tx.protocols.length === 0 && tx.tokenFlows.length === 0 && tx.ethFlows.length === 0 && (
+        {tx.protocols.length === 0 && tx.tokenFlows.length === 0 && tx.ethFlows.length === 0 && tx.deployments.length === 0 && (
           <div className="empty-state" style={{ padding: 16 }}>No value flows detected</div>
         )}
       </div>

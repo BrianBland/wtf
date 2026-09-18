@@ -30,6 +30,7 @@ export interface RawReceipt {
   transactionHash: string
   gasUsed: string
   status?: string
+  contractAddress?: string | null
 }
 
 export interface RawLog {
@@ -74,6 +75,7 @@ export interface Transaction {
   tokenFlows: TokenFlow[]
   ethFlows: EthFlow[]
   protocols: ProtocolEvent[]
+  deployments: Deployment[]
   reverted?: boolean             // true when receipt status is 0x0
   userOps?: UserOp[]             // populated for ERC-4337 handleOps txs
 }
@@ -123,6 +125,22 @@ export interface ProtocolEvent {
   user?: string
   extra?: Record<string, unknown>
 }
+
+export type Deployment =
+  | {
+      kind: 'contract'
+      address: string
+      source: 'receipt'
+    }
+  | {
+      kind: 'b20'
+      address: string
+      source: 'b20-factory'
+      variant: 'asset' | 'stablecoin'
+      name: string
+      symbol: string
+      decimals: number
+    }
 
 // Call trace from debug_traceTransaction with callTracer
 export interface CallTrace {

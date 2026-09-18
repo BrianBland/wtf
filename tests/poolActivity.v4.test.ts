@@ -24,6 +24,7 @@ function tx(overrides: Partial<Transaction>): Transaction {
     tokenFlows: [],
     ethFlows: [],
     protocols: [],
+    deployments: [],
     ...overrides,
   }
 }

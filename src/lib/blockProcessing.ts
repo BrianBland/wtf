@@ -11,6 +11,7 @@ import { decodeCalldata, DecodedValue } from './calldataDecoder'
 import { RpcClient } from './rpc'
 import { detectProtocolHint, fetchV3PoolProtocols, processLogs } from './logProcessing'
 import { V4PoolKey, resolveV4PoolKeys } from './v4PoolKey'
+import { detectDeployments } from './deployments'
 
 const HANDLEOPS_SELECTORS = new Set(['0x1fad948c', '0x765e827f'])
 
@@ -87,11 +88,16 @@ export function processBlock(
   }
 
   const gasUsedByTx = new Map<string, bigint>()
+  const receiptByTx = new Map<string, RawReceipt>()
   const revertedTxSet = new Set<string>()
-  if (rawReceipts) {
+  if (Array.isArray(rawReceipts)) {
     for (const r of rawReceipts) {
+      if (!r || typeof r !== 'object' || typeof r.transactionHash !== 'string') continue
       const txHash = r.transactionHash.toLowerCase()
-      gasUsedByTx.set(txHash, hexToBigInt(r.gasUsed))
+      receiptByTx.set(txHash, r)
+      if (typeof r.gasUsed === 'string' && /^0x(?:0|[1-9a-f][0-9a-f]*)$/i.test(r.gasUsed)) {
+        gasUsedByTx.set(txHash, hexToBigInt(r.gasUsed))
+      }
       if (r.status === '0x0') revertedTxSet.add(txHash)
     }
   }
@@ -130,6 +136,7 @@ export function processBlock(
         ? [{ from: rawTx.from.toLowerCase(), to: rawTx.to?.toLowerCase() ?? '0x', value, type: 'tx' as const }]
         : [],
       protocols,
+      deployments: detectDeployments(logs, rawTx, receiptByTx.get(hash)),
       reverted: revertedTxSet.has(hash) || undefined,
       userOps: methodSelector
         ? extractUserOps(logs, rawTx.input, methodSelector, poolProtocols, v4PoolKeys)
