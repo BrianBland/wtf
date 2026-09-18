@@ -4,6 +4,7 @@ import { CallTrace, Log } from '../types'
 import { HexTag, SelectorTag, TopicTag } from './HexTag'
 import { CollapsibleList } from './CollapsibleList'
 import { TokenFlowList, EthFlowList, ProtocolEventList, NetFlowSummary } from './ValueFlow'
+import { DeploymentList } from './DeploymentList'
 import { KNOWN_PROTOCOLS, KNOWN_TOKENS } from '../lib/protocols'
 import {
   formatEth, formatGas, formatNumber, shortAddr,
@@ -420,6 +421,7 @@ function TxMeta({ txHash, blockNumber }: { txHash: string; blockNumber: number }
   if (!tx) return null
 
   const toProto = tx.to ? KNOWN_PROTOCOLS[tx.to] : null
+  const createdContract = tx.deployments.find((deployment) => deployment.kind === 'contract')
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
@@ -444,7 +446,11 @@ function TxMeta({ txHash, blockNumber }: { txHash: string; blockNumber: number }
             label: 'To',
             content: tx.to
               ? <><HexTag value={tx.to} type="address" />{toProto && <span className="badge muted">{toProto.name}</span>}</>
-              : <span className="badge muted">contract deploy</span>,
+              : createdContract
+                ? <><HexTag value={createdContract.address} type="address" /><span className="badge muted">created</span></>
+                : <span className={`badge ${tx.reverted ? 'red' : 'muted'}`}>
+                    {tx.reverted ? 'contract creation failed' : 'contract creation unconfirmed'}
+                  </span>,
           },
         ].map(({ label, content }) => (
           <div key={label} style={{ padding: '6px 12px', borderRight: '1px solid var(--border)' }}>
@@ -533,7 +539,7 @@ export function TxView({ txHash, blockNumber }: { txHash: string; blockNumber: n
             >
               {t}
               {t === 'logs'  && ` (${tx.logs.length})`}
-              {t === 'flows' && ` (${tx.tokenFlows.length + tx.ethFlows.length})`}
+              {t === 'flows' && ` (${tx.tokenFlows.length + tx.ethFlows.length + tx.deployments.length})`}
             </button>
           ))}
         </div>
@@ -541,6 +547,14 @@ export function TxView({ txHash, blockNumber }: { txHash: string; blockNumber: n
         <div className="scroll-y" style={{ flex: 1 }}>
           {tab === 'flows' && (
             <>
+              {/* Deployments are not protocol events or token flows. */}
+              {tx.deployments.length > 0 && (
+                <section>
+                  <div className="panel-header">Deployments ({tx.deployments.length})</div>
+                  <DeploymentList deployments={tx.deployments} />
+                </section>
+              )}
+
               {/* Protocol events */}
               {tx.protocols.length > 0 && (
                 <section>
@@ -573,7 +587,7 @@ export function TxView({ txHash, blockNumber }: { txHash: string; blockNumber: n
                 </section>
               )}
 
-              {tx.protocols.length === 0 && tx.tokenFlows.length === 0 && tx.ethFlows.length === 0 && (
+              {tx.protocols.length === 0 && tx.tokenFlows.length === 0 && tx.ethFlows.length === 0 && tx.deployments.length === 0 && (
                 <div className="empty-state">No token or ETH flows detected in logs</div>
               )}
             </>
@@ -662,6 +676,7 @@ export function TxView({ txHash, blockNumber }: { txHash: string; blockNumber: n
           <div style={{ padding: '0 12px 12px' }}>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
               {[
+                { label: 'Deployments',     value: tx.deployments.length },
                 { label: 'Protocol Events', value: tx.protocols.length },
                 { label: 'Token Transfers', value: tx.tokenFlows.length },
                 { label: 'ETH Movements',   value: tx.ethFlows.length },
@@ -685,6 +700,14 @@ export function TxView({ txHash, blockNumber }: { txHash: string; blockNumber: n
             <section>
               <div className="panel-header">Call</div>
               <DecodedCallView key={tx.hash} input={tx.input} selector={tx.methodSelector} />
+            </section>
+          )}
+
+          {/* Deployment quick list */}
+          {tx.deployments.length > 0 && (
+            <section>
+              <div className="panel-header">Deployments</div>
+              <DeploymentList deployments={tx.deployments} />
             </section>
           )}
 
