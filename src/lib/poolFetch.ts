@@ -3,6 +3,7 @@ import { RpcClient } from './rpc'
 const TOKEN0_SEL  = '0x0dfe1681'
 const TOKEN1_SEL  = '0xd21220a7'
 const FACTORY_SEL = '0xc45a0155'
+const MAX_CONCURRENT_POOL_CALLS = 4
 
 // Known factory addresses on Base — V3-style (CL) and V2-style (classic AMM)
 export const FACTORY_PROTOCOLS: Record<string, string> = {
@@ -41,9 +42,61 @@ export interface PoolMeta {
   protocol: string   // 'Uniswap V3' | 'Uniswap V2' | 'Aerodrome CL' | 'Aerodrome' | 'Unknown'
 }
 
-function decodeAddr(hex: string): string {
-  if (!hex || hex.length < 42) return ''
-  return '0x' + hex.slice(-40).toLowerCase()
+interface PoolResolverState {
+  activeCalls: number
+  callQueue: Array<() => void>
+  inFlight: Map<string, Promise<PoolMeta>>
+}
+
+const resolverStates = new WeakMap<RpcClient, PoolResolverState>()
+
+function getResolverState(client: RpcClient): PoolResolverState {
+  let state = resolverStates.get(client)
+  if (!state) {
+    state = { activeCalls: 0, callQueue: [], inFlight: new Map() }
+    resolverStates.set(client, state)
+  }
+  return state
+}
+
+function drainCallQueue(state: PoolResolverState): void {
+  while (state.activeCalls < MAX_CONCURRENT_POOL_CALLS) {
+    const start = state.callQueue.shift()
+    if (!start) return
+    start()
+  }
+}
+
+function scheduleCall<T>(state: PoolResolverState, call: () => Promise<T>): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    state.callQueue.push(() => {
+      state.activeCalls++
+      const run = async () => {
+        try {
+          resolve(await call())
+        } catch (error) {
+          reject(error)
+        } finally {
+          state.activeCalls--
+          drainCallQueue(state)
+        }
+      }
+      // run handles the transport rejection itself, so this detached cleanup task cannot reject.
+      void run()
+    })
+    drainCallQueue(state)
+  })
+}
+
+function decodeAddressWord(value: unknown, field: string): string {
+  if (typeof value !== 'string' || !/^0x[0-9a-fA-F]{64}$/.test(value)) {
+    throw new Error(`Malformed ${field} response: expected a 32-byte ABI word`)
+  }
+  const word = value.slice(2)
+  if (!/^0{24}/.test(word)) {
+    throw new Error(`Malformed ${field} response: address is not zero-padded`)
+  }
+  return `0x${word.slice(24).toLowerCase()}`
 }
 
 /** Pool metadata calls require an actual 20-byte contract address, never a bytes32 PoolId. */
@@ -51,10 +104,16 @@ export function isPoolAddress(address: string): boolean {
   return /^0x[0-9a-fA-F]{40}$/.test(address)
 }
 
-export async function fetchPoolMeta(client: RpcClient, poolAddress: string): Promise<PoolMeta> {
-  if (!isPoolAddress(poolAddress)) throw new Error('Pool metadata requires a 20-byte address')
-  const call = (data: string) =>
-    client.call<string>('eth_call', [{ to: poolAddress, data }, 'latest']).catch(() => '0x')
+async function resolvePoolMeta(
+  client: RpcClient,
+  state: PoolResolverState,
+  poolAddress: string,
+  blockTag: string,
+): Promise<PoolMeta> {
+  const call = (data: string) => scheduleCall(
+    state,
+    () => client.call<string>('eth_call', [{ to: poolAddress, data }, blockTag]),
+  )
 
   const [t0hex, t1hex, facHex] = await Promise.all([
     call(TOKEN0_SEL),
@@ -62,10 +121,43 @@ export async function fetchPoolMeta(client: RpcClient, poolAddress: string): Pro
     call(FACTORY_SEL),
   ])
 
-  const token0   = decodeAddr(t0hex)
-  const token1   = decodeAddr(t1hex)
-  const factory  = decodeAddr(facHex)
+  const token0   = decodeAddressWord(t0hex, 'token0')
+  const token1   = decodeAddressWord(t1hex, 'token1')
+  const factory  = decodeAddressWord(facHex, 'factory')
+  const zeroAddress = '0x0000000000000000000000000000000000000000'
+  if (token0 === zeroAddress) throw new Error('Invalid pool metadata: token0 is the zero address')
+  if (token1 === zeroAddress) throw new Error('Invalid pool metadata: token1 is the zero address')
+  if (factory === zeroAddress) throw new Error('Invalid pool metadata: factory is the zero address')
+  if (token0 === token1) throw new Error('Invalid pool metadata: token0 and token1 are identical')
   const protocol = FACTORY_PROTOCOLS[factory] ?? 'Unknown'
 
   return { token0, token1, factory, protocol }
+}
+
+export async function fetchPoolMeta(
+  client: RpcClient,
+  poolAddress: string,
+  blockTag = 'latest',
+): Promise<PoolMeta> {
+  if (!isPoolAddress(poolAddress)) throw new Error('Pool metadata requires a 20-byte address')
+
+  const normalizedPool = poolAddress.toLowerCase()
+  const state = getResolverState(client)
+  const key = `${normalizedPool}:${blockTag}`
+  const existing = state.inFlight.get(key)
+  if (existing) return existing
+
+  const request = resolvePoolMeta(client, state, normalizedPool, blockTag)
+  state.inFlight.set(key, request)
+  // Use both handlers instead of a detached finally(): the cleanup promise always fulfills,
+  // while the returned request retains its original success or rejection for every caller.
+  void request.then(
+    () => {
+      if (state.inFlight.get(key) === request) state.inFlight.delete(key)
+    },
+    () => {
+      if (state.inFlight.get(key) === request) state.inFlight.delete(key)
+    },
+  )
+  return request
 }

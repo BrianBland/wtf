@@ -68,6 +68,7 @@ export async function fetchV3PoolProtocols(
   client: RpcClient,
   rawLogs: RawLog[],
   poolCache: Map<string, PoolMeta | 'loading' | 'error'>,
+  blockTag = 'latest',
 ): Promise<{ protocols: Map<string, string>; newMeta: Map<string, PoolMeta> }> {
   const v3Pools = new Set<string>()
   for (const log of rawLogs) {
@@ -89,18 +90,17 @@ export async function fetchV3PoolProtocols(
     const cached = poolCache.get(addr)
     if (cached && typeof cached === 'object') {
       protocols.set(addr, cached.protocol)
-    } else if (!cached || cached === 'loading') {
-      // Also fetch pools that are 'loading' — another component may have triggered
-      // a concurrent fetch, but we need the result synchronously for block processing.
+    } else {
+      // Retry absent, loading, and error entries. In-flight resolver deduplication prevents
+      // duplicate calls for this client/pool/block while allowing a later block to retry.
       toFetch.push(addr)
     }
-    // 'error' → skip, falls back to hint
   }
 
   const newMeta = new Map<string, PoolMeta>()
   if (toFetch.length > 0) {
     const results = await Promise.all(
-      toFetch.map((addr) => fetchPoolMeta(client, addr).catch(() => null))
+      toFetch.map((addr) => fetchPoolMeta(client, addr, blockTag).catch(() => null))
     )
     for (let i = 0; i < toFetch.length; i++) {
       const meta = results[i]
