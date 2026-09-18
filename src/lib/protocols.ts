@@ -39,9 +39,11 @@ export const KNOWN_PROTOCOLS: Record<string, ProtocolInfo> = {
   // Aerodrome (classic AMM + Slipstream CL)
   '0xcf77a3ba9a5ca399b7c97c74d54e5b1beb874e43': { name: 'Aerodrome Router',         type: 'dex' },
   '0x420dd381b31aef6683db6b902084cb0ffece40da': { name: 'Aerodrome Factory',         type: 'dex' },
-  '0xade65c38cd4849adba595a4323a8c7ddfe89716a': { name: 'Aerodrome V2 Factory',      type: 'dex' },
-  '0x827922686190fd9b3eb5c2af8154a8ab3efb61d5': { name: 'Aerodrome Voter',           type: 'dex' },
+  '0xf8f2eb4940cfe7d13603dddd87f123820fc061ef': { name: 'Aerodrome CL Factory',      type: 'dex' },
   '0x5e7bb104d84c7cb9b682aac2f3d509f5f406809a': { name: 'Aerodrome CL Factory',      type: 'dex' },
+  '0xade65c38cd4849adba595a4323a8c7ddfe89716a': { name: 'Aerodrome CL Factory',      type: 'dex' },
+  '0x9592cd9b267748cbfbde90ac9f7df3c437a6d51b': { name: 'Aerodrome CL Factory (legacy)', type: 'dex' },
+  '0x16613524e02ad97edfef371bc883f2f5d6c480a5': { name: 'Aerodrome Voter',           type: 'dex' },
   '0xbe6d8f0d05cc4be24d5167a3ef062215be6d18a5': { name: 'Aerodrome CL SwapRouter',   type: 'dex' },
   '0xe1f8cd9ac4e4a65f54f38a5cdafca44f6dd68b53': { name: 'Aerodrome CL Position Manager', type: 'dex' },
   // PancakeSwap
@@ -52,8 +54,11 @@ export const KNOWN_PROTOCOLS: Record<string, ProtocolInfo> = {
   '0xc35dadb65012ec5796536bd9864ed8773abc74c4': { name: 'SushiSwap V3 Factory',      type: 'dex' },
   '0x71524b4f93c58fcbf659783284e38825f0622859': { name: 'SushiSwap V2 Factory',      type: 'dex' },
   // BaseSwap
-  '0xaed85e1d0c7e6e18335b9ea858ce1ab06934eab5': { name: 'BaseSwap V3 Factory',       type: 'dex' },
+  '0x38015d05f4fec8afe15d7cc0386a126574e8077b': { name: 'BaseSwap V3 Factory',       type: 'dex' },
+  '0xaed85e1d0c7e6e18335b9ea858ce1ab06934eab5': { name: 'BaseSwap V3 Factory (legacy)', type: 'dex' },
   '0xfda619b6d20975be80a10332cd39b9a4b0faa8bb': { name: 'BaseSwap V2 Factory',       type: 'dex' },
+  // 9mm
+  '0x7b72c4002ea7c276dd717b96b20f4956c5c904e7': { name: '9mm V3 Factory',           type: 'dex' },
   // Alien Base
   '0x0fd83557b2be93617c9c1c1b6fd549401c74558c': { name: 'Alien Base V3 Factory',     type: 'dex' },
   // Solidly V3
@@ -118,9 +123,12 @@ export const KNOWN_PROTOCOLS: Record<string, ProtocolInfo> = {
 // Address sets for protocol routing disambiguation
 export const AERODROME_ADDRESSES = new Set([
   '0xcf77a3ba9a5ca399b7c97c74d54e5b1beb874e43',  // Router
-  '0x420dd381b31aef6683db6b902084cb0ffece40da',  // Factory
-  '0x827922686190fd9b3eb5c2af8154a8ab3efb61d5',  // Voter
+  '0x420dd381b31aef6683db6b902084cb0ffece40da',  // Classic factory
+  '0xf8f2eb4940cfe7d13603dddd87f123820fc061ef',  // CL Factory
   '0x5e7bb104d84c7cb9b682aac2f3d509f5f406809a',  // CL Factory
+  '0xade65c38cd4849adba595a4323a8c7ddfe89716a',  // CL Factory
+  '0x9592cd9b267748cbfbde90ac9f7df3c437a6d51b',  // Historical CL factory
+  '0x16613524e02ad97edfef371bc883f2f5d6c480a5',  // Voter
   '0xbe6d8f0d05cc4be24d5167a3ef062215be6d18a5',  // CL SwapRouter
   '0xe1f8cd9ac4e4a65f54f38a5cdafca44f6dd68b53',  // CL Position Manager
 ])
@@ -480,6 +488,7 @@ export const PROTOCOL_COLORS: Record<string, string> = {
   'PancakeSwap V3':  '#1fc7d4',
   'SushiSwap V3':    '#fa52a0',
   'BaseSwap V3':     '#4a90e2',
+  '9mm V3':          '#c8a84e',  // Canonical 9MM Pro brass
   // DEX — V2-style AMM
   'Uniswap V2':      '#ff6da0',
   'Aerodrome':       '#0039b3',  // darker Aerodrome blue
@@ -605,6 +614,7 @@ export const PROTOCOL_CLASSIFICATION: Record<string, string> = {
   'PancakeSwap V3':  'Concentrated Liquidity',
   'SushiSwap V3':    'Concentrated Liquidity',
   'BaseSwap V3':     'Concentrated Liquidity',
+  '9mm V3':          'Concentrated Liquidity',
   'Alien Base V3':   'Concentrated Liquidity',
   'Solidly V3':      'Concentrated Liquidity',
   'Hydrex':          'Concentrated Liquidity',
