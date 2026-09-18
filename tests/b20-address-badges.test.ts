@@ -13,10 +13,11 @@ import { KNOWN_PROTOCOLS, KNOWN_TOKENS } from '../src/lib/protocols'
 // SSR itself runs no effects and performs no metadata RPC calls.
 Object.defineProperty(globalThis, 'React', { configurable: true, value: React })
 Object.defineProperty(globalThis, 'document', { configurable: true, value: { addEventListener() {} } })
-const [{ HexTag, TokenBadge }, { Histogram }, { useStore }] = await Promise.all([
+const [{ HexTag, TokenBadge }, { Histogram }, { useStore }, { TokenFlowBadges }] = await Promise.all([
   import('../src/components/HexTag'),
   import('../src/components/Histogram'),
   import('../src/store'),
+  import('../src/components/BlockView'),
 ])
 Reflect.deleteProperty(globalThis, 'document')
 after(() => { Reflect.deleteProperty(globalThis, 'React') })
@@ -197,4 +198,20 @@ test('address Histogram uses B20 label, type color, and full type-aware titles',
   assert.match(output, />…cdef<\/span>/)
   assert.match(output, new RegExp(`title="B20 Stablecoin · ${STABLECOIN}"`))
   assert.ok(output.includes(`title="B20 Stablecoin · ${STABLECOIN} (click to copy)"`))
+})
+
+test('transaction-row token placeholders use B20 presentation before metadata loads', () => {
+  const ordinary = '0x1234567890abcdef1234567890abcdef12345678'
+  const output = markup(createElement(TokenFlowBadges, {
+    tokenFlows: [
+      { token: ASSET, from: ordinary, to: STABLECOIN, amount: 1n },
+      { token: ordinary, from: ASSET, to: STABLECOIN, amount: 2n },
+    ],
+  }))
+
+  assert.match(output, /b20-tag b20-asset/)
+  assert.match(output, /background-color:#1d4ed8/)
+  assert.match(output, />…abcd<\/span>/)
+  assert.match(output, new RegExp(`title="B20 Asset · ${ASSET}"`))
+  assert.match(output, new RegExp(`<span class="badge cyan" title="${ordinary}">1234</span>`))
 })

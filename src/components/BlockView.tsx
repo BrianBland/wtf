@@ -6,7 +6,7 @@ import { BlockStateAccessView } from './BlockStateAccessView'
 import { buildHistograms } from '../lib/aggregations'
 import { SortKey } from './Histogram'
 import { Histogram } from './Histogram'
-import { HexTag, SelectorTag } from './HexTag'
+import { HexTag, SelectorTag, TokenBadge } from './HexTag'
 import { CollapsibleList } from './CollapsibleList'
 import { ProtocolEventList, TokenFlowList, EthFlowList } from './ValueFlow'
 import { AccountActivity } from './AccountActivity'
@@ -18,6 +18,7 @@ import { carryBlockFilters } from '../lib/urlState'
 import { KNOWN_TOKENS, KNOWN_PROTOCOLS, KNOWN_SELECTORS } from '../lib/protocols'
 import { formatEth, formatGas, formatGwei, formatTimestamp, formatAge, formatNumber, shortHash } from '../lib/formatters'
 import { effectivePriorityFee, txGasUsed } from '../lib/txMetrics'
+import { classifyB20Address } from '../lib/b20'
 
 // ── DeFi action glyphs ────────────────────────────────────────────────────
 
@@ -225,7 +226,7 @@ function BlockHistograms({
 
 type TxFilter = BlockTxFilter
 
-function TokenFlowBadges({ tokenFlows }: { tokenFlows: TokenFlow[] }) {
+export function TokenFlowBadges({ tokenFlows }: { tokenFlows: TokenFlow[] }) {
   const { tokenCache } = useStore()
   const tokens = [...new Set(tokenFlows.map((f) => f.token))]
   const shown  = tokens.slice(0, 3)
@@ -234,6 +235,9 @@ function TokenFlowBadges({ tokenFlows }: { tokenFlows: TokenFlow[] }) {
   return (
     <>
       {shown.map((addr) => {
+        if (classifyB20Address(addr)) {
+          return <TokenBadge key={addr} address={addr} />
+        }
         const s = KNOWN_PROTOCOLS[addr] ? null : (
           tokenCache.get(addr) && typeof tokenCache.get(addr) === 'object'
             ? (tokenCache.get(addr) as { symbol: string }).symbol
