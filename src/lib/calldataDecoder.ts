@@ -1,3 +1,5 @@
+import { AMM_BURN_TOPIC, AAVE_FLASH_LOAN_TOPIC } from './protocols'
+
 // Lightweight ABI calldata decoder — no external dependencies
 
 export interface AbiInput {
@@ -682,7 +684,7 @@ export const EVENT_ABI_MAP: Record<string, AbiEvent> = {
     { name: 'to',         type: 'address', indexed: true  },
   ]},
   // AMM Burn
-  '0xdccd412f0b1252819cb1fd330b93224ca42612892bb3f4cf2e500068de590b6f': { name: 'Burn', inputs: [
+  [AMM_BURN_TOPIC]: { name: 'Burn', inputs: [
     { name: 'sender',  type: 'address', indexed: true  },
     { name: 'amount0', type: 'uint256', indexed: false },
     { name: 'amount1', type: 'uint256', indexed: false },
@@ -773,14 +775,14 @@ export const EVENT_ABI_MAP: Record<string, AbiEvent> = {
     { name: 'liquidator',            type: 'address', indexed: false },
     { name: 'receiveAToken',         type: 'bool',    indexed: false },
   ]},
-  '0x631042c832b07452973831137f2d73e395028b44b250dedc5abb0ee766e168ac': { name: 'FlashLoan', inputs: [
+  [AAVE_FLASH_LOAN_TOPIC]: { name: 'FlashLoan', inputs: [
     { name: 'target',           type: 'address', indexed: true  },
-    { name: 'initiator',        type: 'address', indexed: true  },
+    { name: 'initiator',        type: 'address', indexed: false },
     { name: 'asset',            type: 'address', indexed: true  },
     { name: 'amount',           type: 'uint256', indexed: false },
     { name: 'interestRateMode', type: 'uint8',   indexed: false },
     { name: 'premium',          type: 'uint256', indexed: false },
-    { name: 'referralCode',     type: 'uint16',  indexed: false },
+    { name: 'referralCode',     type: 'uint16',  indexed: true  },
   ]},
   // Morpho Blue
   '0xedf8870433c83823eb071d3df1caa8d008f12f6440918c20d75a3602cda30fe0': { name: 'Supply', inputs: [

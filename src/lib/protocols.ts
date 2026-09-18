@@ -343,7 +343,8 @@ export const COMPOUND_BORROW_TOPIC = '0x13ed6866d4e1ee6da46f845c46d7e54120883d75
 export const COMPOUND_REPAY_TOPIC  = '0x1a2a22cb034d26d1854bdc6a1da3f587a5e8bb8e7ac2b96cb5b9c70620d8bc8a'
 // Aerodrome / Uni V2 AMM LP events
 // Burn(address indexed sender, uint256 amount0, uint256 amount1, address indexed to)
-export const AMM_BURN_TOPIC        = '0xdccd412f0b1252819cb1fd330b93224ca42612892bb3f4cf2e500068de590b6f'
+// keccak256("Burn(address,uint256,uint256,address)") — see Uniswap/v2-core IUniswapV2Pair.sol
+export const AMM_BURN_TOPIC        = '0xdccd412f0b1252819cb1fd330b93224ca42612892bb3f4f789976e6d81936496'
 // Uniswap V3 / Aerodrome Slipstream pool Mint (concentrated liquidity pool-level event)
 // Mint(address sender, address indexed owner, int24 indexed tickLower, int24 indexed tickUpper, uint128 amount, uint256 amount0, uint256 amount1)
 export const UNI_V3_POOL_MINT_TOPIC = '0x7a53080ba414158be7ec69b987b5fb7d07dee101fe85488f0853ae16239d0bde'
@@ -396,8 +397,9 @@ export const COMPOUND3_WITHDRAW_TOPIC = '0x9b1bfa7fa9ee420a16e124f794c35ac9f9047
 // AbsorbDebt(address indexed absorber, address indexed borrower, uint256 basePaidOut, uint256 usdValue) — liquidation
 export const COMPOUND3_ABSORB_TOPIC   = '0x1547a878dc89ad3c367b6338b4be6a65a5dd74fb77ae044da1e8747ef1f4f62f'
 // Flash loan events
-// Aave V3: FlashLoan(address indexed target, address indexed initiator, address indexed asset, uint256 amount, uint8 interestRateMode, uint256 premium, uint16 referralCode)
-export const AAVE_FLASH_LOAN_TOPIC     = '0x631042c832b07452973831137f2d73e395028b44b250dedc5abb0ee766e168ac'
+// Aave V3: FlashLoan(address indexed target, address initiator, address indexed asset, uint256 amount, uint8 interestRateMode, uint256 premium, uint16 indexed referralCode)
+// keccak256("FlashLoan(address,address,address,uint256,uint8,uint256,uint16)") — see aave/aave-v3-origin IPool.sol
+export const AAVE_FLASH_LOAN_TOPIC     = '0xefefaba5e921573100900a3ad9cf29f222d995fb3b6045797eaea7521bd8d6f0'
 // Morpho Blue: FlashLoan(address indexed caller, address indexed token, uint256 assets)
 export const MORPHO_FLASH_LOAN_TOPIC   = '0xc76f1b4fe4396ac07a9fa55a415d4ca430e72651d37d3401f3bed7cb13fc4f12'
 // Balancer V2: FlashLoan(address indexed recipient, address indexed token, uint256 amount, uint256 feeAmount)
