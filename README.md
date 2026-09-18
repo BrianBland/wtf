@@ -36,7 +36,7 @@ State access tracing requires a node with `debug_traceTransaction` support (e.g.
 
 ## Testing
 
-Offline unit tests (event decoding, synthetic log fixtures) run via `node:test`:
+Offline regression tests run via `node:test` and `tsx`, with no network access or Foundry required.
 
 ```bash
 npm test
