@@ -249,12 +249,15 @@ export function processLogs(
     }
 
     if (t0 === AAVE_FLASH_LOAN_TOPIC &&
-        (log.address === AAVE_V3_POOL_ADDRESS || log.address === SEAMLESS_POOL_ADDRESS)) {
+        (log.address === AAVE_V3_POOL_ADDRESS || log.address === SEAMLESS_POOL_ADDRESS) &&
+        log.topics.length === 4 && log.topics.every(topic => /^0x[0-9a-f]{64}$/i.test(topic)) &&
+        /^0x[0-9a-f]{256}$/i.test(log.data)) {
       const aaveProtocol = log.address === SEAMLESS_POOL_ADDRESS ? 'Seamless' : 'Aave V3'
       protocols.push({
         protocol: aaveProtocol, action: 'Flash Loan',
-        token:  log.topics[3] ? topicToAddress(log.topics[3]) : undefined,
-        amount: decodeUint256(log.data, 0),
+        // topics: [sig, target, asset, referralCode]; data: [initiator, amount, interestRateMode, premium]
+        token:  topicToAddress(log.topics[2]),
+        amount: decodeUint256(log.data, 1),
       })
     }
 

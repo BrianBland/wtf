@@ -33,3 +33,11 @@ npm run dev
 Then open `http://localhost:5173`, enter a WebSocket RPC URL (e.g. `wss://base.drpc.org`), and connect.
 
 State access tracing requires a node with `debug_traceTransaction` support (e.g. a full node or a debug-enabled RPC provider).
+
+## Testing
+
+Offline unit tests (event decoding, synthetic log fixtures) run via `node:test`:
+
+```bash
+npm test
+```
