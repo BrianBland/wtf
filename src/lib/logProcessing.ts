@@ -6,7 +6,7 @@ import {
   AAVE_REPAY_TOPIC, AAVE_LIQUIDATION_TOPIC,
   COMPOUND_MINT_TOPIC, COMPOUND_REDEEM_TOPIC,
   COMPOUND_BORROW_TOPIC, COMPOUND_REPAY_TOPIC,
-  AMM_BURN_TOPIC, UNI_V3_POOL_MINT_TOPIC, UNI_V3_POOL_BURN_TOPIC,
+  AMM_BURN_TOPIC, UNI_V3_POOL_MINT_TOPIC, UNI_V3_POOL_BURN_TOPIC, UNI_V3_POOL_COLLECT_TOPIC,
   UNI_V3_INCREASE_LIQ_TOPIC, UNI_V3_DECREASE_LIQ_TOPIC, UNI_V3_COLLECT_TOPIC,
   BALANCER_SWAP_TOPIC,
   MORPHO_SUPPLY_TOPIC, MORPHO_SUPPLY_COLLATERAL_TOPIC,
@@ -41,7 +41,7 @@ import {
 } from './protocols'
 import {
   hexToBigInt,
-  topicToAddress, decodeUint256, decodeInt256,
+  topicToAddress, decodeUint256, decodeInt256, decodeAddress,
 } from './formatters'
 import { RpcClient } from './rpc'
 
@@ -73,7 +73,7 @@ export async function fetchV3PoolProtocols(
   for (const log of rawLogs) {
     const t0 = log.topics[0]?.toLowerCase()
     // Include both V3-style and V2-style swap/LP pools — factory lookup disambiguates both
-    if (t0 === UNI_V3_SWAP_TOPIC || t0 === PANCAKE_V3_SWAP_TOPIC || t0 === UNI_V3_POOL_MINT_TOPIC || t0 === UNI_V3_POOL_BURN_TOPIC || t0 === AMM_SWAP_TOPIC || t0 === AERODROME_AMM_SWAP_TOPIC || t0 === AMM_BURN_TOPIC) {
+    if (t0 === UNI_V3_SWAP_TOPIC || t0 === PANCAKE_V3_SWAP_TOPIC || t0 === UNI_V3_POOL_MINT_TOPIC || t0 === UNI_V3_POOL_BURN_TOPIC || t0 === UNI_V3_POOL_COLLECT_TOPIC || t0 === AMM_SWAP_TOPIC || t0 === AERODROME_AMM_SWAP_TOPIC || t0 === AMM_BURN_TOPIC) {
       v3Pools.add(log.address.toLowerCase())
     }
     // V2 AMM AddLiquidity (COMPOUND_MINT_TOPIC with indexed sender = AMM pool, not cToken)
@@ -131,23 +131,92 @@ export function processLogs(
   const tokenFlows: TokenFlow[] = []
   const protocols: ProtocolEvent[] = []
 
-  // Pre-pass: collect V3 pool addresses from pool-level Mint/Burn events.
+  // Pre-pass: collect V3 pool addresses from pool-level Mint/Burn/Collect events.
   // NonfungiblePositionManager events (IncreaseLiquidity/DecreaseLiquidity/Collect) fire from
   // the NftPM address — not the pool — so we look up the actual pool from adjacent pool events.
   const v3MintPools: string[] = []
   const v3BurnPools: string[] = []
-  for (const log of logs) {
-    const t0 = log.topics[0]?.toLowerCase()
-    if (t0 === UNI_V3_POOL_MINT_TOPIC) v3MintPools.push(log.address.toLowerCase())
-    if (t0 === UNI_V3_POOL_BURN_TOPIC) v3BurnPools.push(log.address.toLowerCase())
+  interface PoolEventRef { address: string; index: number; consumed: boolean }
+  // Pool-level Mint events, tracked with the fields needed to *confirm* — not just guess — that a
+  // given IncreaseLiquidity describes the same underlying liquidity addition: same owner (the
+  // position is minted directly to this NftPM contract) and identical liquidity/amount0/amount1.
+  // A merely-nearby Mint with a different owner or amounts must not be treated as evidence.
+  interface PoolMintEventRef extends PoolEventRef {
+    owner: string; liquidity: bigint; amount0: bigint; amount1: bigint
   }
+  const v3MintEvents: PoolMintEventRef[] = []
+  const v3BurnEvents: PoolEventRef[] = []
+  // Pool-level Collect events (the canonical source of collection amounts), tracked the same way
+  // so a manager Collect can be matched back to the actual pool it collected from — see
+  // UNI_V3_COLLECT_TOPIC handling below. Matching requires the pool event's owner to be this
+  // NftPM contract plus an exact recipient/amount0/amount1 match.
+  interface PoolCollectEventRef extends PoolEventRef {
+    owner: string; recipient: string; amount0: bigint; amount1: bigint
+  }
+  const v3PoolCollectEvents: PoolCollectEventRef[] = []
+  logs.forEach((log, index) => {
+    const t0 = log.topics[0]?.toLowerCase()
+    if (t0 === UNI_V3_POOL_MINT_TOPIC) {
+      v3MintPools.push(log.address.toLowerCase())
+      // Mint(address sender, address indexed owner, int24 indexed tickLower, int24 indexed tickUpper, uint128 amount, uint256 amount0, uint256 amount1)
+      v3MintEvents.push({
+        address: log.address.toLowerCase(), index, consumed: false,
+        owner: log.topics[1] ? topicToAddress(log.topics[1]) : '',
+        liquidity: decodeUint256(log.data, 1),
+        amount0: decodeUint256(log.data, 2),
+        amount1: decodeUint256(log.data, 3),
+      })
+    }
+    if (t0 === UNI_V3_POOL_BURN_TOPIC) {
+      v3BurnPools.push(log.address.toLowerCase())
+      v3BurnEvents.push({ address: log.address.toLowerCase(), index, consumed: false })
+    }
+    if (t0 === UNI_V3_POOL_COLLECT_TOPIC) {
+      // Collect(address indexed owner, address recipient, int24 indexed tickLower, int24 indexed tickUpper, uint128 amount0, uint128 amount1)
+      v3PoolCollectEvents.push({
+        address: log.address.toLowerCase(), index, consumed: false,
+        owner: log.topics[1] ? topicToAddress(log.topics[1]) : '',
+        recipient: decodeAddress(log.data, 0),
+        amount0: decodeUint256(log.data, 1),
+        amount1: decodeUint256(log.data, 2),
+      })
+    }
+  })
   // Resolve protocol for NftPM events via associated pool-level events.
   const resolveNftmProtocol = (poolAddrs: string[], managerAddr?: string): string =>
     poolAddrs.map(a => poolProto(a)).find(p => p !== undefined)
       ?? (managerAddr ? detectPositionManagerClProtocol(managerAddr) : null)
       ?? clProtocol
+  // Find the nearest preceding, unconsumed pool Mint that *confirms* this IncreaseLiquidity is the
+  // same liquidity addition (same owner, identical liquidity/amount0/amount1) — not merely the
+  // nearest Mint by position, which proves nothing about a real relationship between the two logs.
+  const findMatchingMint = (
+    beforeIndex: number, managerAddr: string, liquidity: bigint, amount0: bigint, amount1: bigint,
+  ): PoolMintEventRef | undefined => {
+    let best: PoolMintEventRef | undefined
+    for (const ev of v3MintEvents) {
+      if (ev.index >= beforeIndex || ev.consumed) continue
+      if (ev.owner !== managerAddr || ev.liquidity !== liquidity || ev.amount0 !== amount0 || ev.amount1 !== amount1) continue
+      if (!best || ev.index > best.index) best = ev
+    }
+    return best
+  }
+  // Find the nearest preceding, unconsumed pool-level Collect that *confirms* this NftPM Collect
+  // describes the same collection: the pool event's owner is this NftPM contract, and the
+  // recipient/amount0/amount1 match exactly. Unrelated Mint/Burn events are never used as evidence.
+  const findMatchingPoolCollect = (
+    beforeIndex: number, managerAddr: string, recipient: string, amount0: bigint, amount1: bigint,
+  ): PoolCollectEventRef | undefined => {
+    let best: PoolCollectEventRef | undefined
+    for (const ev of v3PoolCollectEvents) {
+      if (ev.index >= beforeIndex || ev.consumed) continue
+      if (ev.owner !== managerAddr || ev.recipient !== recipient || ev.amount0 !== amount0 || ev.amount1 !== amount1) continue
+      if (!best || ev.index > best.index) best = ev
+    }
+    return best
+  }
 
-  for (const log of logs) {
+  logs.forEach((log, i) => {
     const t0 = log.topics[0]?.toLowerCase()
 
     if (t0 === TRANSFER_TOPIC && log.topics.length >= 3) {
@@ -517,16 +586,48 @@ export function processLogs(
       })
     }
 
-    if (t0 === UNI_V3_INCREASE_LIQ_TOPIC) {
-      const poolAddr = v3MintPools[0] ?? log.address
+    if (t0 === UNI_V3_POOL_COLLECT_TOPIC) {
+      // Pool-level Collect is the canonical, authoritative source for a collection's actual pool
+      // and amounts — always report it. A matching NftPM Collect below (owner/recipient/amounts
+      // confirmed) is suppressed rather than pushed again, so a single collection is never counted
+      // twice.
       protocols.push({
-        protocol: resolveNftmProtocol(v3MintPools, log.address), action: 'AddLiquidity',
+        protocol: poolProto(log.address) ?? clProtocol, action: 'CollectFees',
         extra: {
-          pool: poolAddr,
+          pool: log.address,
           amount0: decodeUint256(log.data, 1).toString(),
           amount1: decodeUint256(log.data, 2).toString(),
         },
       })
+    }
+
+    if (t0 === UNI_V3_INCREASE_LIQ_TOPIC) {
+      const liquidity = decodeUint256(log.data, 0)
+      const amount0   = decodeUint256(log.data, 1)
+      const amount1   = decodeUint256(log.data, 2)
+      // The pool-level Mint event (emitted just before this one, from the same underlying
+      // pool.mint() call) already records this exact liquidity addition. Only treat it as the same
+      // addition — and skip pushing a duplicate — when it's confirmed via owner (the position is
+      // minted to this NftPM contract) and matching liquidity/amounts; a merely-preceding,
+      // unrelated Mint (different owner, or partial/mismatched amounts) must not suppress this.
+      const matchedMint = findMatchingMint(i, log.address.toLowerCase(), liquidity, amount0, amount1)
+      if (matchedMint) {
+        matchedMint.consumed = true
+      } else {
+        // No confirmed pool-level Mint in this log window (e.g. truncated log range, or the
+        // pool.mint() call isn't in this log set). Preserve the manager + tokenId identity without
+        // inventing a `pool` — treating the manager address as a pool would create phantom pool
+        // activity/volume/metadata lookups downstream (buildPoolActivity, pool metadata eth_calls).
+        protocols.push({
+          protocol: detectPositionManagerClProtocol(log.address) ?? clProtocol, action: 'AddLiquidity',
+          extra: {
+            manager: log.address,
+            tokenId: log.topics[1] ? decodeUint256(log.topics[1]).toString() : undefined,
+            amount0: amount0.toString(),
+            amount1: amount1.toString(),
+          },
+        })
+      }
     }
 
     if (t0 === UNI_V3_DECREASE_LIQ_TOPIC) {
@@ -542,15 +643,32 @@ export function processLogs(
     }
 
     if (t0 === UNI_V3_COLLECT_TOPIC) {
-      const allPools = v3BurnPools.length > 0 ? v3BurnPools : v3MintPools
-      protocols.push({
-        protocol: resolveNftmProtocol(allPools, log.address), action: 'CollectFees',
-        extra: {
-          pool: allPools[0] ?? log.address,
-          amount0: decodeUint256(log.data, 1).toString(),
-          amount1: decodeUint256(log.data, 2).toString(),
-        },
-      })
+      const recipient = decodeAddress(log.data, 0)
+      const amount0   = decodeUint256(log.data, 1)
+      const amount1   = decodeUint256(log.data, 2)
+      // Attribute to the actual pool via the matching pool-level Collect (owner is this NftPM
+      // contract, recipient/amount0/amount1 identical) — never an unrelated Mint/Burn, which proves
+      // nothing about which pool was collected from.
+      const matched = findMatchingPoolCollect(i, log.address.toLowerCase(), recipient, amount0, amount1)
+      if (matched) {
+        // Already reported (authoritatively) by the pool-level Collect handler above; consume it
+        // so it isn't matched again, and skip pushing a duplicate CollectFees for this manager event.
+        matched.consumed = true
+      } else {
+        // No confirmed pool-level Collect in this log window (e.g. truncated log range, or
+        // collecting a position that was fully decreased in an earlier transaction). Preserve
+        // manager + tokenId identity without inventing a `pool` — treating the manager address as a
+        // pool would create phantom pool activity/volume/metadata lookups downstream.
+        protocols.push({
+          protocol: detectPositionManagerClProtocol(log.address) ?? clProtocol, action: 'CollectFees',
+          extra: {
+            manager: log.address,
+            tokenId: log.topics[1] ? decodeUint256(log.topics[1]).toString() : undefined,
+            amount0: amount0.toString(),
+            amount1: amount1.toString(),
+          },
+        })
+      }
     }
 
     if (t0 === COMPOUND_REDEEM_TOPIC) {
@@ -573,7 +691,7 @@ export function processLogs(
         token: log.address, amount: decodeUint256(log.data, 2),
       })
     }
-  }
+  })
 
   const hasV4Swaps = protocols.some(ev => ev.protocol === 'Uniswap V4' && ev.action === 'Swap')
   if (hasV4Swaps) {

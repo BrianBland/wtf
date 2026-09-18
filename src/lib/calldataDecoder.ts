@@ -2,6 +2,10 @@ import { AMM_BURN_TOPIC, AAVE_FLASH_LOAN_TOPIC } from './protocols'
 
 // Lightweight ABI calldata decoder — no external dependencies
 
+import {
+  UNI_V3_INCREASE_LIQ_TOPIC, UNI_V3_DECREASE_LIQ_TOPIC, UNI_V3_COLLECT_TOPIC, UNI_V3_POOL_COLLECT_TOPIC,
+} from './protocols'
+
 export interface AbiInput {
   name: string
   type: string
@@ -710,23 +714,35 @@ export const EVENT_ABI_MAP: Record<string, AbiEvent> = {
     { name: 'amount1',   type: 'uint256', indexed: false },
   ]},
   // Uniswap V3 NonfungiblePositionManager
-  '0x3067048beee31b25b2f1681f88dac838c8bba36af25bfb2b7cf7473a5847e35c': { name: 'IncreaseLiquidity', inputs: [
+  // Keyed via the shared topic constants (rather than duplicated literals) so a future topic
+  // correction in protocols.ts can't silently leave this decoder map pointing at a stale hash.
+  [UNI_V3_INCREASE_LIQ_TOPIC]: { name: 'IncreaseLiquidity', inputs: [
     { name: 'tokenId',   type: 'uint256', indexed: true  },
     { name: 'liquidity', type: 'uint128', indexed: false },
     { name: 'amount0',   type: 'uint256', indexed: false },
     { name: 'amount1',   type: 'uint256', indexed: false },
   ]},
-  '0x26f6a048ee9138f2c0ce266f322cb99228e8d619ae2bff30c67f8dcf9d2377b4': { name: 'DecreaseLiquidity', inputs: [
+  [UNI_V3_DECREASE_LIQ_TOPIC]: { name: 'DecreaseLiquidity', inputs: [
     { name: 'tokenId',   type: 'uint256', indexed: true  },
     { name: 'liquidity', type: 'uint128', indexed: false },
     { name: 'amount0',   type: 'uint256', indexed: false },
     { name: 'amount1',   type: 'uint256', indexed: false },
   ]},
-  '0x40d0efd1a53d60ecbf40971b9daf7dc90178c3eff3b3f722c8d5fdd96b56f8c9': { name: 'Collect', inputs: [
+  [UNI_V3_COLLECT_TOPIC]: { name: 'Collect', inputs: [
     { name: 'tokenId',          type: 'uint256', indexed: true  },
     { name: 'recipient',        type: 'address', indexed: false },
     { name: 'amount0Collected', type: 'uint256', indexed: false },
     { name: 'amount1Collected', type: 'uint256', indexed: false },
+  ]},
+  // Uniswap V3 / CL pool Collect (canonical pool-level event; distinct from the
+  // NonfungiblePositionManager's Collect above, which is emitted from the manager address)
+  [UNI_V3_POOL_COLLECT_TOPIC]: { name: 'Collect', inputs: [
+    { name: 'owner',     type: 'address', indexed: true  },
+    { name: 'recipient', type: 'address', indexed: false },
+    { name: 'tickLower', type: 'int24',   indexed: true  },
+    { name: 'tickUpper', type: 'int24',   indexed: true  },
+    { name: 'amount0',   type: 'uint128', indexed: false },
+    { name: 'amount1',   type: 'uint128', indexed: false },
   ]},
   // Balancer V2 Swap
   '0x2170c741c41531aec20e7c107c24eecfdd15e69c9bb0a8dd37b1840b9e0b207b': { name: 'Swap', inputs: [

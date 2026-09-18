@@ -351,13 +351,18 @@ export const UNI_V3_POOL_MINT_TOPIC = '0x7a53080ba414158be7ec69b987b5fb7d07dee10
 // Uniswap V3 / Aerodrome Slipstream pool Burn (concentrated liquidity pool-level event)
 // Burn(address indexed owner, int24 indexed tickLower, int24 indexed tickUpper, uint128 amount, uint256 amount0, uint256 amount1)
 export const UNI_V3_POOL_BURN_TOPIC  = '0x0c396cd989a39f4459b5fa1aed6a9a8dcdbc45908acfd67e028cd568da98982c'
+// Uniswap V3 / Aerodrome Slipstream pool Collect (concentrated liquidity pool-level event — the
+// canonical source of truth for fee/withdrawal collection amounts; NonfungiblePositionManager's
+// own Collect below is emitted from the manager address and must be matched back to this event)
+// Collect(address indexed owner, address recipient, int24 indexed tickLower, int24 indexed tickUpper, uint128 amount0, uint128 amount1)
+export const UNI_V3_POOL_COLLECT_TOPIC = '0x70935338e69775456a85ddef226c395fb668b63fa0115f5f20610b388e6ca9c0'
 // Uniswap V3 NonfungiblePositionManager LP events
 // IncreaseLiquidity(uint256 indexed tokenId, uint128 liquidity, uint256 amount0, uint256 amount1)
-export const UNI_V3_INCREASE_LIQ_TOPIC = '0x3067048beee31b25b2f1681f88dac838c8bba36af25bfb2b7cf7473a5847e35c'
+export const UNI_V3_INCREASE_LIQ_TOPIC = '0x3067048beee31b25b2f1681f88dac838c8bba36af25bfb2b7cf7473a5847e35f'
 // DecreaseLiquidity(uint256 indexed tokenId, uint128 liquidity, uint256 amount0, uint256 amount1)
 export const UNI_V3_DECREASE_LIQ_TOPIC = '0x26f6a048ee9138f2c0ce266f322cb99228e8d619ae2bff30c67f8dcf9d2377b4'
 // Collect(uint256 indexed tokenId, address recipient, uint256 amount0Collected, uint256 amount1Collected)
-export const UNI_V3_COLLECT_TOPIC      = '0x40d0efd1a53d60ecbf40971b9daf7dc90178c3eff3b3f722c8d5fdd96b56f8c9'
+export const UNI_V3_COLLECT_TOPIC      = '0x40d0efd1a53d60ecbf40971b9daf7dc90178c3aadc7aab1765632738fa8b8f01'
 // Balancer V2 — Swap(bytes32 indexed poolId, address indexed tokenIn, address indexed tokenOut, uint256 amountIn, uint256 amountOut)
 export const BALANCER_SWAP_TOPIC = '0x2170c741c41531aec20e7c107c24eecfdd15e69c9bb0a8dd37b1840b9e0b207b'
 // Morpho Blue events (from morpho-org/morpho-blue EventsLib.sol)
@@ -541,6 +546,7 @@ export const KNOWN_TOPICS: Record<string, string> = {
   [AMM_BURN_TOPIC]:                    'Burn',
   [UNI_V3_POOL_MINT_TOPIC]:            'Mint (V3)',
   [UNI_V3_POOL_BURN_TOPIC]:            'Burn (V3)',
+  [UNI_V3_POOL_COLLECT_TOPIC]:         'Collect (V3)',
   [UNI_V3_INCREASE_LIQ_TOPIC]:         'IncreaseLiquidity',
   [UNI_V3_DECREASE_LIQ_TOPIC]:         'DecreaseLiquidity',
   [UNI_V3_COLLECT_TOPIC]:              'Collect',
