@@ -18,6 +18,7 @@ import { carryBlockFilters } from '../lib/urlState'
 import { KNOWN_TOKENS, KNOWN_PROTOCOLS, KNOWN_SELECTORS } from '../lib/protocols'
 import { formatEth, formatGas, formatGwei, formatTimestamp, formatAge, formatNumber, shortHash } from '../lib/formatters'
 import { effectivePriorityFee, txGasUsed } from '../lib/txMetrics'
+import { classifyB20Address } from '../lib/b20'
 
 // ── DeFi action glyphs ────────────────────────────────────────────────────
 
@@ -225,7 +226,7 @@ function BlockHistograms({
 
 type TxFilter = BlockTxFilter
 
-function TokenFlowBadges({ tokenFlows }: { tokenFlows: TokenFlow[] }) {
+export function TokenFlowBadges({ tokenFlows }: { tokenFlows: TokenFlow[] }) {
   const { tokenCache } = useStore()
   const tokens = [...new Set(tokenFlows.map((f) => f.token))]
   const shown  = tokens.slice(0, 3)
@@ -234,15 +235,22 @@ function TokenFlowBadges({ tokenFlows }: { tokenFlows: TokenFlow[] }) {
   return (
     <>
       {shown.map((addr) => {
-        const s = KNOWN_PROTOCOLS[addr] ? null : (
+        // Transaction rows consume metadata already in the cache; they do not initiate lookups.
+        const cachedSymbol = KNOWN_PROTOCOLS[addr] ? null : (
           tokenCache.get(addr) && typeof tokenCache.get(addr) === 'object'
             ? (tokenCache.get(addr) as { symbol: string }).symbol
             : null
         )
-        const staticSym = (KNOWN_TOKENS as Record<string, { symbol: string }>)[addr]?.symbol
-        const sym = staticSym ?? s ?? addr.slice(2, 6).toUpperCase()
+        const staticSymbol = (KNOWN_TOKENS as Record<string, { symbol: string }>)[addr]?.symbol
+        const resolvedSymbol = staticSymbol ?? cachedSymbol
+
+        if (classifyB20Address(addr)) {
+          return <HexTag key={addr} value={addr} type="address" label={resolvedSymbol ?? undefined} />
+        }
+
+        const label = resolvedSymbol ?? addr.slice(2, 6).toUpperCase()
         return (
-          <span key={addr} className="badge cyan" title={addr}>{sym}</span>
+          <span key={addr} className="badge cyan" title={addr}>{label}</span>
         )
       })}
       {extra > 0 && <span className="badge muted" style={{ fontSize: 9 }}>+{extra}</span>}

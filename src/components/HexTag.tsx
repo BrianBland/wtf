@@ -1,7 +1,8 @@
 import { useState } from 'react'
-import { hexColors, keyToHsl, contrastColor } from '../lib/colorize'
+import { hexColors } from '../lib/colorize'
 import { KNOWN_TOKENS, KNOWN_PROTOCOLS, KNOWN_SELECTORS, KNOWN_TOPICS } from '../lib/protocols'
 import { shortAddr } from '../lib/formatters'
+import { b20Title, getB20AddressBadgeMetadata } from '../lib/b20'
 import { useStore } from '../store'
 import { getCachedSelector, getCachedEventTopic, lookupSelector, lookupEventTopic } from '../lib/fourByte'
 import { hasKnownFunctionAbi, selectorMatchesKnownAbi, sigMatchesCalldata } from '../lib/calldataDecoder'
@@ -21,10 +22,13 @@ interface HexTagProps {
 
 function getLabel(value: string, type: HexTagProps['type']): string {
   if (type === 'address') {
-    const token = KNOWN_TOKENS[value]
+    const address = value.toLowerCase()
+    const token = KNOWN_TOKENS[address]
     if (token) return token.symbol
-    const proto = KNOWN_PROTOCOLS[value]
+    const proto = KNOWN_PROTOCOLS[address]
     if (proto) return proto.name
+    const b20 = getB20AddressBadgeMetadata(value)
+    if (b20) return b20.label
     return shortAddr(value)
   }
   if (type === 'selector') {
@@ -37,8 +41,14 @@ export function HexTag({
   value, type = 'address', muted = false, copyable = true, className = '', title, label: labelProp,
 }: HexTagProps) {
   const [copied, setCopied] = useState(false)
+  const b20 = type === 'address' ? getB20AddressBadgeMetadata(value) : null
   const label = labelProp ?? getLabel(value, type)
-  const { bg, text } = muted ? { bg: 'var(--surface3)', text: 'var(--text2)' } : hexColors(value)
+  const { bg, text } = muted
+    ? { bg: 'var(--surface3)', text: 'var(--text2)' }
+    : b20
+      ? { bg: b20.backgroundColor, text: b20.color }
+      : hexColors(value)
+  const resolvedTitle = b20 ? b20Title(b20, title) : (title ?? value)
 
   const handleClick = (e: React.MouseEvent) => {
     if (!copyable) return
@@ -51,9 +61,10 @@ export function HexTag({
 
   return (
     <span
-      className={`hex-tag ${muted ? 'muted' : ''} ${className}`}
-      style={{ backgroundColor: bg, color: text }}
-      title={title ?? value}
+      className={`hex-tag ${muted ? 'muted' : ''} ${b20 ? `b20-tag b20-${b20.type}` : ''} ${className}`}
+      style={{ backgroundColor: bg, color: text, border: b20 && !muted ? `1px solid ${b20.borderColor}` : undefined }}
+      title={resolvedTitle}
+      aria-label={b20 ? resolvedTitle : undefined}
       onClick={handleClick}
     >
       {copied ? '✓ copied' : label}
@@ -120,44 +131,43 @@ function DynamicTopicTag({ topic }: { topic: string }) {
  * once the metadata loads the symbol replaces the address automatically.
  */
 export function TokenBadge({ address }: { address: string }) {
-  const addr = address.toLowerCase()
+  const normalizedAddress = address.toLowerCase()
 
   // 1. Static known tokens (hardcoded)
-  const staticToken = KNOWN_TOKENS[addr]
+  const staticToken = KNOWN_TOKENS[normalizedAddress]
   if (staticToken) {
+    const b20 = getB20AddressBadgeMetadata(address)
+    if (b20) {
+      return <HexTag value={address} type="address" label={staticToken.symbol} />
+    }
     return (
       <span
         className="badge"
         style={{ background: `${staticToken.color}22`, color: staticToken.color, border: `1px solid ${staticToken.color}44` }}
-        title={addr}
+        title={normalizedAddress}
       >
         {staticToken.symbol}
       </span>
     )
   }
 
-  return <DynamicTokenBadge address={addr} />
+  return <DynamicTokenBadge address={address} normalizedAddress={normalizedAddress} />
 }
 
-function DynamicTokenBadge({ address }: { address: string }) {
+function DynamicTokenBadge({ address, normalizedAddress }: { address: string; normalizedAddress: string }) {
   const { getToken } = useStore()
-  usePrefetchTokenMetadata([address])
+  usePrefetchTokenMetadata([normalizedAddress])
 
-  const details = getToken(address)
+  const details = getToken(normalizedAddress)
 
   if (details) {
-    // Derive a color from the address bytes, same as HexTag
-    const bg   = keyToHsl(address)
-    const text = contrastColor(bg)
     return (
-      <span
-        className="hex-tag"
-        style={{ backgroundColor: bg, color: text }}
+      <HexTag
+        value={address}
+        type="address"
+        label={details.symbol}
         title={`${details.name} · ${address} · ${details.decimals} decimals`}
-        onClick={(e) => { e.stopPropagation(); navigator.clipboard.writeText(address) }}
-      >
-        {details.symbol}
-      </span>
+      />
     )
   }
 
