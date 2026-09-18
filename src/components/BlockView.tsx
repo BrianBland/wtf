@@ -6,7 +6,7 @@ import { BlockStateAccessView } from './BlockStateAccessView'
 import { buildHistograms } from '../lib/aggregations'
 import { SortKey } from './Histogram'
 import { Histogram } from './Histogram'
-import { HexTag, SelectorTag, TokenBadge } from './HexTag'
+import { HexTag, SelectorTag } from './HexTag'
 import { CollapsibleList } from './CollapsibleList'
 import { ProtocolEventList, TokenFlowList, EthFlowList } from './ValueFlow'
 import { AccountActivity } from './AccountActivity'
@@ -235,18 +235,22 @@ export function TokenFlowBadges({ tokenFlows }: { tokenFlows: TokenFlow[] }) {
   return (
     <>
       {shown.map((addr) => {
-        if (classifyB20Address(addr)) {
-          return <TokenBadge key={addr} address={addr} />
-        }
-        const s = KNOWN_PROTOCOLS[addr] ? null : (
+        // Transaction rows consume metadata already in the cache; they do not initiate lookups.
+        const cachedSymbol = KNOWN_PROTOCOLS[addr] ? null : (
           tokenCache.get(addr) && typeof tokenCache.get(addr) === 'object'
             ? (tokenCache.get(addr) as { symbol: string }).symbol
             : null
         )
-        const staticSym = (KNOWN_TOKENS as Record<string, { symbol: string }>)[addr]?.symbol
-        const sym = staticSym ?? s ?? addr.slice(2, 6).toUpperCase()
+        const staticSymbol = (KNOWN_TOKENS as Record<string, { symbol: string }>)[addr]?.symbol
+        const resolvedSymbol = staticSymbol ?? cachedSymbol
+
+        if (classifyB20Address(addr)) {
+          return <HexTag key={addr} value={addr} type="address" label={resolvedSymbol ?? undefined} />
+        }
+
+        const label = resolvedSymbol ?? addr.slice(2, 6).toUpperCase()
         return (
-          <span key={addr} className="badge cyan" title={addr}>{sym}</span>
+          <span key={addr} className="badge cyan" title={addr}>{label}</span>
         )
       })}
       {extra > 0 && <span className="badge muted" style={{ fontSize: 9 }}>+{extra}</span>}

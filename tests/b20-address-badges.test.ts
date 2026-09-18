@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { after, afterEach, test } from 'node:test'
 import React, { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
+import { act, create as createTestRenderer } from 'react-test-renderer'
 import {
   classifyB20Address,
   getB20AddressBadgeMetadata,
@@ -200,18 +201,39 @@ test('address Histogram uses B20 label, type color, and full type-aware titles',
   assert.ok(output.includes(`title="B20 Stablecoin · ${STABLECOIN} (click to copy)"`))
 })
 
-test('transaction-row token placeholders use B20 presentation before metadata loads', () => {
+test('transaction-row B20 badges do not fetch metadata and react to cached symbols', () => {
   const ordinary = '0x1234567890abcdef1234567890abcdef12345678'
-  const output = markup(createElement(TokenFlowBadges, {
-    tokenFlows: [
-      { token: ASSET, from: ordinary, to: STABLECOIN, amount: 1n },
-      { token: ordinary, from: ASSET, to: STABLECOIN, amount: 2n },
-    ],
-  }))
+  const tokenFlows = [
+    { token: ASSET, from: ordinary, to: STABLECOIN, amount: 1n },
+    { token: ordinary, from: ASSET, to: STABLECOIN, amount: 2n },
+  ]
+  const originalFetchToken = useStore.getState().fetchToken
+  let fetchCalls = 0
+  useStore.setState({ fetchToken: () => { fetchCalls += 1 } })
 
-  assert.match(output, /b20-tag b20-asset/)
-  assert.match(output, /background-color:#1d4ed8/)
-  assert.match(output, />…abcd<\/span>/)
-  assert.match(output, new RegExp(`title="B20 Asset · ${ASSET}"`))
-  assert.match(output, new RegExp(`<span class="badge cyan" title="${ordinary}">1234</span>`))
+  let renderer!: ReturnType<typeof createTestRenderer>
+  try {
+    act(() => { renderer = createTestRenderer(createElement(TokenFlowBadges, { tokenFlows })) })
+    const unresolved = JSON.stringify(renderer.toJSON())
+    assert.match(unresolved, /b20-tag b20-asset/)
+    assert.match(unresolved, /…abcd/)
+    assert.match(unresolved, /badge cyan/)
+    assert.match(unresolved, /1234/)
+    assert.equal(fetchCalls, 0)
+
+    act(() => {
+      useStore.setState({
+        tokenCache: new Map([[ASSET, {
+          symbol: 'B20C', name: 'Cached B20', decimals: 18, isNFT: false,
+        }]]),
+      })
+    })
+    const cached = JSON.stringify(renderer.toJSON())
+    assert.match(cached, /b20-tag b20-asset/)
+    assert.match(cached, /B20C/)
+    assert.equal(fetchCalls, 0)
+  } finally {
+    act(() => { renderer?.unmount() })
+    useStore.setState({ fetchToken: originalFetchToken })
+  }
 })
