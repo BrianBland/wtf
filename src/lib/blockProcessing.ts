@@ -10,6 +10,7 @@ import {
 import { decodeCalldata, DecodedValue } from './calldataDecoder'
 import { RpcClient } from './rpc'
 import { detectProtocolHint, fetchV3PoolProtocols, processLogs } from './logProcessing'
+import { V4PoolKey, resolveV4PoolKeys } from './v4PoolKey'
 
 const HANDLEOPS_SELECTORS = new Set(['0x1fad948c', '0x765e827f'])
 
@@ -18,6 +19,7 @@ function extractUserOps(
   input: string,
   selector: string,
   poolProtocols: Map<string, string>,
+  v4PoolKeys: Map<string, V4PoolKey>,
 ): UserOp[] | undefined {
   if (!HANDLEOPS_SELECTORS.has(selector)) return undefined
 
@@ -53,7 +55,7 @@ function extractUserOps(
     }
 
     const logSlice = logSlices[i] ?? []
-    const { tokenFlows, protocols } = processLogs(logSlice, null, poolProtocols)
+    const { tokenFlows, protocols } = processLogs(logSlice, null, poolProtocols, v4PoolKeys)
 
     return { index: i, sender, nonce, callData, success, actualGasUsed, tokenFlows, protocols, logs: logSlice }
   })
@@ -74,6 +76,7 @@ export function processBlock(
   rawLogs: RawLog[],
   rawReceipts: RawReceipt[] | null,
   poolProtocols: Map<string, string> = new Map(),
+  v4PoolKeys: Map<string, V4PoolKey> = new Map(),
 ): Block {
   const logsByTx = new Map<string, Log[]>()
   for (const rl of rawLogs) {
@@ -97,7 +100,7 @@ export function processBlock(
     const hash = rawTx.hash.toLowerCase()
     const logs = logsByTx.get(hash) ?? []
     const hint = detectProtocolHint(rawTx.to)
-    const { tokenFlows, protocols } = processLogs(logs, hint, poolProtocols)
+    const { tokenFlows, protocols } = processLogs(logs, hint, poolProtocols, v4PoolKeys)
     const value = hexToBigInt(rawTx.value)
     const gasUsed = gasUsedByTx.get(hash)
     const maxPriorityFeePerGas = rawTx.maxPriorityFeePerGas
@@ -129,7 +132,7 @@ export function processBlock(
       protocols,
       reverted: revertedTxSet.has(hash) || undefined,
       userOps: methodSelector
-        ? extractUserOps(logs, rawTx.input, methodSelector, poolProtocols)
+        ? extractUserOps(logs, rawTx.input, methodSelector, poolProtocols, v4PoolKeys)
         : undefined,
     }
   })
@@ -150,12 +153,14 @@ export function processBlock(
 export interface LoadedBlockData {
   block: Block
   newMeta: Map<string, PoolMeta>
+  newV4PoolKeys: Map<string, V4PoolKey>
 }
 
 export async function loadBlockData(
   client: RpcClient,
   blockNumber: number,
   poolCache: Map<string, PoolMeta | 'loading' | 'error'>,
+  v4PoolKeyCache: Map<string, V4PoolKey> = new Map(),
 ): Promise<LoadedBlockData | null> {
   const hexN = `0x${blockNumber.toString(16)}`
   const [raw, rawLogs, rawReceipts] = await Promise.all([
@@ -166,9 +171,19 @@ export async function loadBlockData(
   if (!raw) return null
 
   const logs = rawLogs ?? []
-  const { protocols: poolProtocols, newMeta } = await fetchV3PoolProtocols(client, logs, poolCache)
+  const [{ protocols: poolProtocols, newMeta }, newV4PoolKeys] = await Promise.all([
+    fetchV3PoolProtocols(client, logs, poolCache),
+    // Pin the PositionManager poolKeys() fallback to this block when practical.
+    resolveV4PoolKeys(client, logs, v4PoolKeyCache, hexN),
+  ])
+  // Merge newly-resolved keys so swaps in *this* block can use them immediately —
+  // the caller's cache won't include them until it processes the returned newV4PoolKeys.
+  const mergedV4PoolKeys = newV4PoolKeys.size > 0
+    ? new Map([...v4PoolKeyCache, ...newV4PoolKeys])
+    : v4PoolKeyCache
   return {
-    block: processBlock(raw, logs, rawReceipts, poolProtocols),
+    block: processBlock(raw, logs, rawReceipts, poolProtocols, mergedV4PoolKeys),
     newMeta,
+    newV4PoolKeys,
   }
 }

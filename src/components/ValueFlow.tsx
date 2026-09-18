@@ -94,10 +94,7 @@ export function EthFlowList({ flows }: { flows: EthFlow[] }) {
 
 export function ProtocolEventList({ events, tokenFlows }: { events: ProtocolEvent[]; tokenFlows?: TokenFlow[] }) {
   usePrefetchPoolMetadata(
-    events.map((ev) => {
-      const pool = ev.extra?.pool as string | undefined
-      return pool && pool.length !== 66 ? pool : null
-    })
+    events.map((ev) => ev.extra?.pool as string | undefined)
   )
   usePrefetchTokenMetadata(
     events.flatMap((ev) => (
@@ -128,9 +125,11 @@ export function ProtocolEventList({ events, tokenFlows }: { events: ProtocolEven
 
         // Swap details: derive in/out from pool token pair + amounts
         const isSwap = ev.action === 'Swap'
+        const isV4Swap = isSwap && ev.protocol === 'Uniswap V4'
+        const v4CurrenciesResolved = !!(ev.extra?.currency0 && ev.extra?.currency1)
         let swapIn:  { tok: ReturnType<typeof resolveToken>; amt: bigint } | null = null
         let swapOut: { tok: ReturnType<typeof resolveToken>; amt: bigint } | null = null
-        if (isSwap && poolMeta) {
+        if (isSwap && !isV4Swap && poolMeta) {
           const a0str = ev.extra?.amount0 as string | undefined
           const a1str = ev.extra?.amount1 as string | undefined
           if (a0str !== undefined && a1str !== undefined) {
@@ -179,6 +178,15 @@ export function ProtocolEventList({ events, tokenFlows }: { events: ProtocolEven
               {ev.protocol}
             </span>
             <span style={{ fontWeight: 600, color }}>{ev.action}</span>
+
+            {isV4Swap && (
+              <span className="muted" style={{ fontSize: 10 }}
+                title={v4CurrenciesResolved
+                  ? 'Pool-level Swap event amounts, not final user settlement; hooks and singleton netting may change settlement.'
+                  : 'PoolKey unavailable; currencies and swap amounts are not inferred from singleton transfers.'}>
+                {v4CurrenciesResolved ? 'Pool-level amounts' : 'Currencies unresolved'}
+              </span>
+            )}
 
             {/* Single-token events (Aave, Morpho, etc.) */}
             {ev.amount !== undefined && token && (

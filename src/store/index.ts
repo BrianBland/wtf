@@ -5,6 +5,7 @@ import {
 } from '../lib/stateAccess'
 import { fetchTokenDetails, TokenDetails } from '../lib/tokenFetch'
 import { fetchPoolMeta, PoolMeta } from '../lib/poolFetch'
+import { V4PoolKey } from '../lib/v4PoolKey'
 import { loadBlockData } from '../lib/blockProcessing'
 import { RpcClient } from '../lib/rpc'
 import { estimateElasticity } from '../lib/chainParams'
@@ -26,6 +27,18 @@ function applyPoolMeta(
     const poolCache = new Map(state.poolCache)
     for (const [addr, meta] of newMeta) poolCache.set(addr, meta)
     return { poolCache }
+  })
+}
+
+function applyV4PoolKeys(
+  set: StoreSet,
+  newV4PoolKeys: Map<string, V4PoolKey>,
+) {
+  if (newV4PoolKeys.size === 0) return
+  set((state) => {
+    const v4PoolKeyCache = new Map(state.v4PoolKeyCache)
+    for (const [id, key] of newV4PoolKeys) v4PoolKeyCache.set(id, key)
+    return { v4PoolKeyCache }
   })
 }
 
@@ -74,6 +87,10 @@ interface Store {
   fetchPool:   (address: string) => void
   getPool:     (address: string) => PoolMeta | undefined
 
+  // Verified Uniswap V4 PoolKey cache (PoolId → currencies/fee/tickSpacing/hooks).
+  // Scoped to the current RPC connection (reset on reconnect, like poolCache/tokenCache).
+  v4PoolKeyCache: Map<string, V4PoolKey>
+
   // Block state access tracing (prestateTracer, progressive)
   blockStateCache:       Map<number, BlockStateProgress>
   startBlockStateTrace:  (blockNumber: number) => void
@@ -114,6 +131,7 @@ function createEmptyRuntimeState() {
     traceError: new Map<string, string>(),
     tokenCache: new Map<string, TokenDetails | 'loading' | 'error'>(),
     poolCache: new Map<string, PoolMeta | 'loading' | 'error'>(),
+    v4PoolKeyCache: new Map<string, V4PoolKey>(),
     blockStateCache: new Map<number, BlockStateProgress>(),
   }
 }
@@ -277,9 +295,10 @@ export const useStore = create<Store>((set, get) => ({
 
     const fetchAndStoreBlock = async (blockNumber: number) => {
       try {
-        const loaded = await loadBlockData(client, blockNumber, get().poolCache)
+        const loaded = await loadBlockData(client, blockNumber, get().poolCache, get().v4PoolKeyCache)
         if (!loaded || !isCurrentClient()) return
         applyPoolMeta(set, loaded.newMeta)
+        applyV4PoolKeys(set, loaded.newV4PoolKeys)
         get().addBlock(loaded.block)
       } catch (e) {
         console.warn(`Block ${blockNumber} fetch failed:`, e)
@@ -311,9 +330,10 @@ export const useStore = create<Store>((set, get) => ({
           if (!isCurrentClient()) return
           try {
             const blockNumber = parseInt(header.number, 16)
-            const loaded = await loadBlockData(client, blockNumber, get().poolCache)
+            const loaded = await loadBlockData(client, blockNumber, get().poolCache, get().v4PoolKeyCache)
             if (!loaded || !isCurrentClient()) return
             applyPoolMeta(set, loaded.newMeta)
+            applyV4PoolKeys(set, loaded.newV4PoolKeys)
             get().addBlock(loaded.block)
             set({ latestBlock: loaded.block.number })
           } catch (e) {
@@ -350,9 +370,10 @@ export const useStore = create<Store>((set, get) => ({
       return { blockLoading: l }
     })
     try {
-      const loaded = await loadBlockData(client, blockNumber, get().poolCache)
+      const loaded = await loadBlockData(client, blockNumber, get().poolCache, get().v4PoolKeyCache)
       if (loaded && get().client === client) {
         applyPoolMeta(set, loaded.newMeta)
+        applyV4PoolKeys(set, loaded.newV4PoolKeys)
         get().addBlock(loaded.block)
       }
     } catch (e) {

@@ -46,7 +46,13 @@ function decodeAddr(hex: string): string {
   return '0x' + hex.slice(-40).toLowerCase()
 }
 
+/** Pool metadata calls require an actual 20-byte contract address, never a bytes32 PoolId. */
+export function isPoolAddress(address: string): boolean {
+  return /^0x[0-9a-fA-F]{40}$/.test(address)
+}
+
 export async function fetchPoolMeta(client: RpcClient, poolAddress: string): Promise<PoolMeta> {
+  if (!isPoolAddress(poolAddress)) throw new Error('Pool metadata requires a 20-byte address')
   const call = (data: string) =>
     client.call<string>('eth_call', [{ to: poolAddress, data }, 'latest']).catch(() => '0x')
 

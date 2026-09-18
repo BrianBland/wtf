@@ -1,5 +1,6 @@
 import { useEffect } from 'react'
 import { KNOWN_TOKENS } from '../lib/protocols'
+import { isPoolAddress } from '../lib/poolFetch'
 import { useStore } from '../store'
 
 function normalizeAddresses(addresses: Iterable<string | null | undefined>): string[] {
@@ -24,7 +25,9 @@ export function usePrefetchTokenMetadata(addresses: Iterable<string | null | und
 
 export function usePrefetchPoolMetadata(poolAddresses: Iterable<string | null | undefined>) {
   const { poolCache, fetchPool, tokenCache, fetchToken } = useStore()
-  const normalizedPools = normalizeAddresses(poolAddresses)
+  // V4 PoolIds are bytes32, not contract addresses — never send them to the
+  // address-only token0()/token1()/factory() eth_call metadata fetch.
+  const normalizedPools = normalizeAddresses(poolAddresses).filter(isPoolAddress)
 
   useEffect(() => {
     for (const address of normalizedPools) {
