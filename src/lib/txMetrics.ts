@@ -24,7 +24,7 @@ export function effectiveGasPrice(tx: Transaction, baseFee: bigint): bigint {
 }
 
 export function totalTxFee(tx: Transaction, baseFee: bigint): bigint {
-  return txGasUsed(tx) * effectiveGasPrice(tx, baseFee)
+  return txGasUsed(tx) * effectiveGasPrice(tx, baseFee) + (tx.l1Fee ?? 0n)
 }
 
 export interface TipRise {

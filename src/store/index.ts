@@ -335,7 +335,8 @@ export const useStore = create<Store>((set, get) => ({
       if (!isCurrentClient()) return
       set({ initialized: true, latestBlock: latest })
       // Estimate EIP-1559 elasticity from the initial block sample
-      set({ chainElasticity: estimateElasticity(get().getSortedBlocks()) })
+      const sorted = get().getSortedBlocks()
+      set({ chainElasticity: sorted.at(-1)?.eip1559?.elasticity ?? estimateElasticity(sorted) })
     } catch (e) {
       if (!isCurrentClient()) return
       // eth_blockNumber itself failed — mark initialized so UI doesn't hang
@@ -354,7 +355,10 @@ export const useStore = create<Store>((set, get) => ({
             applyPoolMeta(set, loaded.newMeta)
             applyV4PoolKeys(set, loaded.newV4PoolKeys)
             get().addBlock(loaded.block)
-            set({ latestBlock: loaded.block.number })
+            set({
+              latestBlock: loaded.block.number,
+              ...(loaded.block.eip1559 && { chainElasticity: loaded.block.eip1559.elasticity }),
+            })
           } catch (e) {
             console.error('Block fetch error', header.number, e)
           }
