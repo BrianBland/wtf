@@ -14,6 +14,7 @@ export const FACTORY_PROTOCOLS: Record<string, string> = {
   '0xf8f2eb4940cfe7d13603dddd87f123820fc061ef': 'Aerodrome CL',
   '0x5e7bb104d84c7cb9b682aac2f3d509f5f406809a': 'Aerodrome CL',
   '0xade65c38cd4849adba595a4323a8c7ddfe89716a': 'Aerodrome CL',
+  '0x9cb220581b91b0c83223012fe69688b92ad07a76': 'Aerodrome CL',   // Aero Slipstream (voter 0x3824…4078)
   '0x9592cd9b267748cbfbde90ac9f7df3c437a6d51b': 'Aerodrome CL',   // Historical
   '0x420dd381b31aef6683db6b902084cb0ffece40da': 'Aerodrome',      // Classic AMM (V2-style)
   // PancakeSwap
