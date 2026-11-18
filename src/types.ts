@@ -29,6 +29,7 @@ export interface RawTransaction {
 export interface RawReceipt {
   transactionHash: string
   gasUsed: string
+  effectiveGasPrice?: string
   status?: string
   contractAddress?: string | null
 }
@@ -67,8 +68,11 @@ export interface Transaction {
   value: bigint
   gas: bigint                    // gas limit from the transaction (upper bound)
   gasUsed?: bigint               // actual gas used (from eth_getBlockReceipts, if available)
-  gasPrice?: bigint              // legacy / type-1 gas price (absent for EIP-1559 type-2 txs)
-  maxPriorityFeePerGas?: bigint  // EIP-1559 priority tip cap per gas (type-2 txs only)
+  type: number                   // EIP-2718 type (0x7e = deposit)
+  gasPrice?: bigint              // legacy / type-1 gas price (absent for EIP-1559-style txs)
+  maxFeePerGas?: bigint          // EIP-1559 fee cap per gas
+  maxPriorityFeePerGas?: bigint  // EIP-1559 priority tip cap per gas
+  effectiveGasPrice?: bigint     // price actually paid, from the receipt when available
   input: string
   methodSelector: string | null  // first 4 bytes of input
   logs: Log[]

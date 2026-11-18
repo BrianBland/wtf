@@ -18,7 +18,7 @@ import { DecodedCallView } from './TxView'
 import { carryBlockFilters } from '../lib/urlState'
 import { KNOWN_TOKENS, KNOWN_PROTOCOLS, KNOWN_SELECTORS } from '../lib/protocols'
 import { formatEth, formatGas, formatGwei, formatTimestamp, formatAge, formatNumber, shortHash } from '../lib/formatters'
-import { effectivePriorityFee, txGasUsed } from '../lib/txMetrics'
+import { TipRise, effectivePriorityFee, findTipRises, txGasUsed } from '../lib/txMetrics'
 import { classifyB20Address } from '../lib/b20'
 
 // ── DeFi action glyphs ────────────────────────────────────────────────────
@@ -283,7 +283,7 @@ function tipColor(tip: bigint): string {
   return '#ff5252'                              // red    ≥ 1 gwei
 }
 
-function TxRow({ tx, baseFee, selected, onClick }: { tx: Transaction; baseFee: bigint; selected: boolean; onClick: () => void }) {
+function TxRow({ tx, baseFee, tipRise, selected, onClick }: { tx: Transaction; baseFee: bigint; tipRise?: TipRise; selected: boolean; onClick: () => void }) {
   const hasEth    = tx.value > 0n
   const hasTokens = tx.tokenFlows.length > 0
   const hasDefi   = tx.protocols.length > 0
@@ -295,7 +295,7 @@ function TxRow({ tx, baseFee, selected, onClick }: { tx: Transaction; baseFee: b
   const dimStyle  = reverted ? { opacity: 0.6 } : undefined
 
   return (
-    <div className={`data-row ${selected ? 'selected' : ''}`} onClick={onClick}>
+    <div className={`data-row ${selected ? 'selected' : ''} ${tipRise ? 'tip-rise' : ''}`} onClick={onClick}>
       {/* Index */}
       <span style={{ color: 'var(--text3)', minWidth: 30, fontSize: 10, fontVariantNumeric: 'tabular-nums', flexShrink: 0 }}>
         {tx.index}
@@ -347,7 +347,17 @@ function TxRow({ tx, baseFee, selected, onClick }: { tx: Transaction; baseFee: b
         <div style={{ fontSize: 10, color: 'var(--text2)' }}>
           {formatGas(gasUsed)}<span style={{ color: 'var(--text3)' }}>/{formatGas(tx.gas)}</span>
         </div>
-        <div style={{ fontSize: 9, color: tipColor(tip) }}>+{formatGwei(tip)}</div>
+        <div
+          style={{ fontSize: 9, color: tipColor(tip) }}
+          title={tipRise
+            ? `Tip is higher than the previous tx ${shortHash(tipRise.previousHash)}${tipRise.sameSender
+              ? ' from the same sender (likely queued txs with ascending tips)'
+              : ' (possible backrun)'}`
+            : undefined}
+        >
+          {tipRise && <span style={{ color: 'var(--amber)' }}>{tipRise.sameSender ? '↑ ' : '▲ '}</span>}
+          +{formatGwei(tip)}
+        </div>
       </div>
 
       {/* Tx explorer link — appears on row hover, far right */}
@@ -1048,6 +1058,7 @@ export function BlockView({
   })
 
   const selectedTxObj = selectedTx ? block.transactions.find((t) => t.hash === selectedTx) : null
+  const tipRises = findTipRises(block.transactions, block.baseFeePerGas)
 
   const hasHistFilter = histFilter.sender !== null || histFilter.recipient !== null || histFilter.selector !== null
 
@@ -1151,6 +1162,7 @@ export function BlockView({
               <TxRow
                 tx={tx}
                 baseFee={block.baseFeePerGas}
+                tipRise={tipRises.get(tx.hash)}
                 selected={tx.hash === selectedTx}
                 onClick={() => setSelectedTx(tx.hash === selectedTx ? null : tx.hash)}
               />
