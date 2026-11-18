@@ -45,6 +45,7 @@ export const KNOWN_PROTOCOLS: Record<string, ProtocolInfo> = {
   '0xf8f2eb4940cfe7d13603dddd87f123820fc061ef': { name: 'Aerodrome CL Factory',      type: 'dex' },
   '0x5e7bb104d84c7cb9b682aac2f3d509f5f406809a': { name: 'Aerodrome CL Factory',      type: 'dex' },
   '0xade65c38cd4849adba595a4323a8c7ddfe89716a': { name: 'Aerodrome CL Factory',      type: 'dex' },
+  '0x9cb220581b91b0c83223012fe69688b92ad07a76': { name: 'Aerodrome CL Factory (Aero)', type: 'dex' },
   '0x9592cd9b267748cbfbde90ac9f7df3c437a6d51b': { name: 'Aerodrome CL Factory (legacy)', type: 'dex' },
   '0x16613524e02ad97edfef371bc883f2f5d6c480a5': { name: 'Aerodrome Voter',           type: 'dex' },
   '0xbe6d8f0d05cc4be24d5167a3ef062215be6d18a5': { name: 'Aerodrome CL SwapRouter',   type: 'dex' },
@@ -130,6 +131,7 @@ export const AERODROME_ADDRESSES = new Set([
   '0xf8f2eb4940cfe7d13603dddd87f123820fc061ef',  // CL Factory
   '0x5e7bb104d84c7cb9b682aac2f3d509f5f406809a',  // CL Factory
   '0xade65c38cd4849adba595a4323a8c7ddfe89716a',  // CL Factory
+  '0x9cb220581b91b0c83223012fe69688b92ad07a76',  // CL Factory (Aero)
   '0x9592cd9b267748cbfbde90ac9f7df3c437a6d51b',  // Historical CL factory
   '0x16613524e02ad97edfef371bc883f2f5d6c480a5',  // Voter
   '0xbe6d8f0d05cc4be24d5167a3ef062215be6d18a5',  // CL SwapRouter
