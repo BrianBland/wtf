@@ -1,3 +1,5 @@
+import type { Eip1559Params } from './lib/baseChain'
+
 // Raw JSON-RPC types (as returned from node)
 export interface RawBlock {
   number: string
@@ -7,6 +9,8 @@ export interface RawBlock {
   gasUsed: string
   gasLimit: string
   baseFeePerGas?: string
+  blobGasUsed?: string
+  extraData?: string
   miner: string
   transactions: RawTransaction[]
 }
@@ -30,6 +34,7 @@ export interface RawReceipt {
   transactionHash: string
   gasUsed: string
   effectiveGasPrice?: string
+  l1Fee?: string
   status?: string
   contractAddress?: string | null
 }
@@ -52,9 +57,12 @@ export interface Block {
   hash: string
   parentHash: string
   timestamp: number
+  timestampMs: number            // includes Denim's sub-second part from the BaseTime tx
   gasUsed: bigint
   gasLimit: bigint
   baseFeePerGas: bigint
+  daFootprint?: bigint           // Jovian+ DA footprint (header blobGasUsed)
+  eip1559?: Eip1559Params        // Holocene+ params from header extraData
   miner: string
   transactions: Transaction[]
 }
@@ -73,6 +81,7 @@ export interface Transaction {
   maxFeePerGas?: bigint          // EIP-1559 fee cap per gas
   maxPriorityFeePerGas?: bigint  // EIP-1559 priority tip cap per gas
   effectiveGasPrice?: bigint     // price actually paid, from the receipt when available
+  l1Fee?: bigint                 // OP Stack L1 data fee, from the receipt
   input: string
   methodSelector: string | null  // first 4 bytes of input
   logs: Log[]

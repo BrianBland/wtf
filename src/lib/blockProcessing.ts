@@ -12,6 +12,7 @@ import { RpcClient } from './rpc'
 import { detectProtocolHint, fetchV3PoolProtocols, processLogs } from './logProcessing'
 import { V4PoolKey, resolveV4PoolKeys } from './v4PoolKey'
 import { detectDeployments } from './deployments'
+import { blockTimestampMs, decodeEip1559Params } from './baseChain'
 
 const HANDLEOPS_SELECTORS = new Set(['0x1fad948c', '0x765e827f'])
 
@@ -89,6 +90,7 @@ export function processBlock(
 
   const gasUsedByTx = new Map<string, bigint>()
   const effectiveGasPriceByTx = new Map<string, bigint>()
+  const l1FeeByTx = new Map<string, bigint>()
   const receiptByTx = new Map<string, RawReceipt>()
   const revertedTxSet = new Set<string>()
   if (Array.isArray(rawReceipts)) {
@@ -102,6 +104,7 @@ export function processBlock(
       if (typeof r.effectiveGasPrice === 'string') {
         effectiveGasPriceByTx.set(txHash, hexToBigInt(r.effectiveGasPrice))
       }
+      if (typeof r.l1Fee === 'string') l1FeeByTx.set(txHash, hexToBigInt(r.l1Fee))
       if (r.status === '0x0') revertedTxSet.add(txHash)
     }
   }
@@ -136,6 +139,7 @@ export function processBlock(
       maxFeePerGas,
       maxPriorityFeePerGas,
       effectiveGasPrice: effectiveGasPriceByTx.get(hash),
+      l1Fee:          l1FeeByTx.get(hash),
       input:          rawTx.input,
       methodSelector,
       logs,
@@ -152,14 +156,20 @@ export function processBlock(
     }
   })
 
+  const timestamp = hexToNumber(raw.timestamp)
+  const eip1559 = decodeEip1559Params(raw.extraData)
   return {
     number:       hexToNumber(raw.number),
     hash:         raw.hash.toLowerCase(),
     parentHash:   raw.parentHash.toLowerCase(),
-    timestamp:    hexToNumber(raw.timestamp),
+    timestamp,
+    timestampMs:  blockTimestampMs(timestamp, transactions),
     gasUsed:      hexToBigInt(raw.gasUsed),
     gasLimit:     hexToBigInt(raw.gasLimit),
     baseFeePerGas: raw.baseFeePerGas ? hexToBigInt(raw.baseFeePerGas) : 0n,
+    // blobGasUsed only means DA footprint on Jovian (v1 extraData) blocks.
+    daFootprint:  eip1559?.minBaseFee !== undefined && raw.blobGasUsed ? hexToBigInt(raw.blobGasUsed) : undefined,
+    eip1559,
     miner:        raw.miner.toLowerCase(),
     transactions,
   }

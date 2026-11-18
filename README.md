@@ -16,6 +16,15 @@ A real-time Ethereum block explorer and DeFi transaction analyzer. Connect to an
 
 **Tx view** — Full transaction detail: value flows, logs, call trace, state diff.
 
+## Base protocol support
+
+Tracks Base upgrades through Denim (200ms blocks):
+- System deposits are labelled: `tx[0]` L1 info (`0x4200…0015`) and, since Denim, `tx[1]` BaseTime (`0x4200…0030`), whose calldata supplies the block's sub-second timestamp.
+- EIP-1559 elasticity, denominator and minimum base fee are read from Holocene/Jovian header `extraData`.
+- Utilization uses `max(gasUsed, DA footprint)` on Jovian+ blocks, matching the base fee rule.
+- Tips are the receipt's `effectiveGasPrice − baseFee`; total fees include the L1 data fee.
+- Base predeploys and native precompiles (fee vaults, BaseTime, B20 registry/policy, nonce manager, tx context) are labelled.
+
 ## Tech stack
 
 - React + TypeScript (Vite)

@@ -8,6 +8,7 @@ import { ProtocolDrillDown } from './ProtocolDrillDown'
 import { MetaSankeyView } from './MetaSankeyView'
 import { formatGas, formatGwei, formatNumber, formatTimestamp, gasColor } from '../lib/formatters'
 import { KNOWN_PROTOCOLS, PROTOCOL_CLASSIFICATION } from '../lib/protocols'
+import { blockUtilization } from '../lib/baseChain'
 
 // ── Sparkline ─────────────────────────────────────────────────────────────
 
@@ -71,7 +72,7 @@ function Sparkline({ blocks, onSelect, metric }: { blocks: Block[]; onSelect: (n
       {blocks.map((block) => {
         const v        = getValue(block)
         const h        = Math.max(2, Math.round((v / maxVal) * 32))
-        const gasRatio = Number(block.gasUsed) / Number(block.gasLimit || 1)
+        const gasRatio = blockUtilization(block)
         return (
           <div
             key={block.number}
@@ -88,7 +89,7 @@ function Sparkline({ blocks, onSelect, metric }: { blocks: Block[]; onSelect: (n
 
       {hovered && (() => {
         const b = hovered.block
-        const gasRatio = Number(b.gasUsed) / Number(b.gasLimit)
+        const gasRatio = blockUtilization(b)
         return (
           <div style={{
             position: 'absolute',
@@ -143,14 +144,14 @@ function BlockListPanel({ blocks, onSelect }: { blocks: Block[]; onSelect: (n: n
       </div>
       <div className="scroll-y" style={{ flex: 1 }}>
         {[...blocks].reverse().map((block) => {
-          const gasRatio = Number(block.gasUsed) / Number(block.gasLimit)
+          const gasRatio = blockUtilization(block)
           return (
             <div key={block.number} className="data-row" onClick={() => onSelect(block.number)}>
               <span style={{ color: 'var(--accent)', fontWeight: 600, minWidth: 78, fontVariantNumeric: 'tabular-nums' }}>
                 #{block.number.toLocaleString()}
               </span>
               <span style={{ color: 'var(--text2)', fontSize: 10, minWidth: 52 }}>
-                {formatTimestamp(block.timestamp)}
+                {formatTimestamp(block.timestampMs)}
               </span>
               <span style={{ minWidth: 36, fontVariantNumeric: 'tabular-nums' }}>
                 {block.transactions.length}
