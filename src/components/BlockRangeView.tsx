@@ -268,7 +268,7 @@ function ClassifiedProtocolHistogram({ entries, sortBy }: { entries: HistEntry[]
 
 // ── Main view ─────────────────────────────────────────────────────────────
 
-/** Trailing throttle: 5 blocks/s would otherwise re-run every aggregation 5 times a second. */
+/** Trailing throttle for the aggregations, which would otherwise re-run 5 times a second. */
 function useThrottledValue<T>(value: T, ms: number): T {
   const [shown, setShown] = useState(value)
   const lastShownAt = useRef(0)
@@ -286,8 +286,10 @@ export function BlockRangeView() {
   const throttledBlocks = useThrottledValue(liveBlocks, 1000)
   // Freeze the feed while the pointer is over it so a block stays put long enough to click.
   const [pausedBlocks, setPausedBlocks] = useState<Map<number, Block> | null>(null)
+  // The shelf and block list stream every block; heavier aggregations update once a second.
+  const feedMap   = pausedBlocks ?? liveBlocks
   const blocksMap = pausedBlocks ?? throttledBlocks
-  const pauseFeed  = () => setPausedBlocks((paused) => paused ?? throttledBlocks)
+  const pauseFeed  = () => setPausedBlocks((paused) => paused ?? liveBlocks)
   const resumeFeed = () => setPausedBlocks(null)
   const [shelfExpanded, setShelfExpanded] = useState(false)
   const goto      = useStore((s) => s.goto)
@@ -297,6 +299,10 @@ export function BlockRangeView() {
   const [col4, setCol4] = useState<'methods' | 'activity'>('methods')
   const [showSankey,    setShowSankey]    = useState(false)
   const [sankeyExpanded, setSankeyExpanded] = useState(false)
+  const feedBlocks = useMemo(
+    () => [...feedMap.values()].sort((a, b) => a.number - b.number),
+    [feedMap]
+  )
   const blocks = useMemo(
     () => [...blocksMap.values()].sort((a, b) => a.number - b.number),
     [blocksMap]
@@ -307,11 +313,11 @@ export function BlockRangeView() {
   )
 
   const handleBlockSelect = (n: number) => goto(carryBlockFilters(nav, { view: 'block', blockNumber: n }))
-  const newWhilePaused = pausedBlocks && latestBlock !== null && blocks.length > 0
-    ? Math.max(0, latestBlock - blocks[blocks.length - 1].number)
+  const newWhilePaused = pausedBlocks && latestBlock !== null && feedBlocks.length > 0
+    ? Math.max(0, latestBlock - feedBlocks[feedBlocks.length - 1].number)
     : 0
-  const shelfSeconds = blocks.length > 1
-    ? Math.round((blocks[blocks.length - 1].timestampMs - blocks[0].timestampMs) / 1000)
+  const shelfSeconds = feedBlocks.length > 1
+    ? Math.round((feedBlocks[feedBlocks.length - 1].timestampMs - feedBlocks[0].timestampMs) / 1000)
     : 0
 
   if (blocks.length === 0) {
@@ -362,7 +368,7 @@ export function BlockRangeView() {
               onClick={() => setSparkMetric('gas')}
             >gas</button>
           </div>
-          <Sparkline blocks={blocks} onSelect={handleBlockSelect} metric={sparkMetric} expanded={shelfExpanded} />
+          <Sparkline blocks={feedBlocks} onSelect={handleBlockSelect} metric={sparkMetric} expanded={shelfExpanded} />
         </div>
       </div>
 
@@ -402,7 +408,7 @@ export function BlockRangeView() {
       {/* Main: block list + 3 histograms */}
       <div style={{ display: 'grid', gridTemplateColumns: '260px 1fr 1fr 1fr', gap: 8, flex: 1, overflow: 'hidden', minHeight: 0 }}>
         <div onMouseEnter={pauseFeed} onMouseLeave={resumeFeed} style={{ minHeight: 0, height: '100%' }}>
-          <BlockListPanel blocks={blocks} onSelect={handleBlockSelect} />
+          <BlockListPanel blocks={feedBlocks} onSelect={handleBlockSelect} />
         </div>
 
         {/* Senders */}
