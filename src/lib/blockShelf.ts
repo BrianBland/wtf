@@ -9,8 +9,9 @@ export function shelfRows(blocks: Block[]): [number, Map<number, Block>][] {
   const byRow = new Map<number, Map<number, Block>>()
   for (const block of blocks) {
     const row = Math.floor(block.number / SHELF_ROW_BLOCKS)
-    if (!byRow.has(row)) byRow.set(row, new Map())
-    byRow.get(row)!.set(block.number, block)
+    let rowBlocks = byRow.get(row)
+    if (!rowBlocks) byRow.set(row, rowBlocks = new Map())
+    rowBlocks.set(block.number, block)
   }
   return [...byRow.entries()].sort(([a], [b]) => b - a)
 }

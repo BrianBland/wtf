@@ -75,11 +75,11 @@ function Sparkline({ blocks, onSelect, metric, expanded }: {
     >
       {visibleRows.map(([row, rowBlocks]) => {
         const first = row * SHELF_ROW_BLOCKS
-        const firstLoaded = rowBlocks.values().next().value as Block
+        const firstLoaded: Block | undefined = rowBlocks.values().next().value
         return (
           <div key={row} style={{ display: 'flex', alignItems: 'flex-end', gap: 6 }}>
             <span style={{ fontSize: 9, color: 'var(--text3)', width: 52, flexShrink: 0, fontVariantNumeric: 'tabular-nums' }}>
-              {formatTimestamp(firstLoaded.timestampMs).slice(0, 8)}
+              {firstLoaded ? formatTimestamp(firstLoaded.timestampMs).slice(0, 8) : ''}
             </span>
             <div className="sparkline shelf-row" style={{ height: rowHeight, flex: 1 }}>
               {Array.from({ length: SHELF_ROW_BLOCKS }, (_, i) => {
@@ -96,8 +96,8 @@ function Sparkline({ blocks, onSelect, metric, expanded }: {
                     onClick={() => onSelect(block.number)}
                     onMouseEnter={(e) => {
                       const rect = containerRef.current?.getBoundingClientRect()
-                      const bar = e.currentTarget.parentElement!.getBoundingClientRect()
-                      if (rect) setHovered({ block, x: e.clientX - rect.left, y: bar.bottom - rect.top })
+                      const bar = e.currentTarget.parentElement?.getBoundingClientRect()
+                      if (rect && bar) setHovered({ block, x: e.clientX - rect.left, y: bar.bottom - rect.top })
                     }}
                   />
                 )
