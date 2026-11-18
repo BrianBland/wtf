@@ -88,6 +88,7 @@ export function processBlock(
   }
 
   const gasUsedByTx = new Map<string, bigint>()
+  const effectiveGasPriceByTx = new Map<string, bigint>()
   const receiptByTx = new Map<string, RawReceipt>()
   const revertedTxSet = new Set<string>()
   if (Array.isArray(rawReceipts)) {
@@ -97,6 +98,9 @@ export function processBlock(
       receiptByTx.set(txHash, r)
       if (typeof r.gasUsed === 'string' && /^0x(?:0|[1-9a-f][0-9a-f]*)$/i.test(r.gasUsed)) {
         gasUsedByTx.set(txHash, hexToBigInt(r.gasUsed))
+      }
+      if (typeof r.effectiveGasPrice === 'string') {
+        effectiveGasPriceByTx.set(txHash, hexToBigInt(r.effectiveGasPrice))
       }
       if (r.status === '0x0') revertedTxSet.add(txHash)
     }
@@ -112,6 +116,7 @@ export function processBlock(
     const maxPriorityFeePerGas = rawTx.maxPriorityFeePerGas
       ? hexToBigInt(rawTx.maxPriorityFeePerGas)
       : undefined
+    const maxFeePerGas = rawTx.maxFeePerGas ? hexToBigInt(rawTx.maxFeePerGas) : undefined
     const gasPrice = rawTx.gasPrice && !rawTx.maxPriorityFeePerGas
       ? hexToBigInt(rawTx.gasPrice)
       : undefined
@@ -126,8 +131,11 @@ export function processBlock(
       value,
       gas:            hexToBigInt(rawTx.gas),
       gasUsed,
+      type:           rawTx.type ? hexToNumber(rawTx.type) : 0,
       gasPrice,
+      maxFeePerGas,
       maxPriorityFeePerGas,
+      effectiveGasPrice: effectiveGasPriceByTx.get(hash),
       input:          rawTx.input,
       methodSelector,
       logs,

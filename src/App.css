@@ -622,3 +622,4 @@ a { color: var(--accent); text-decoration: none; }
   0%   { background-position: 200% 0; }
   100% { background-position: -200% 0; }
 }
+.data-row.tip-rise { box-shadow: inset 2px 0 0 var(--amber); }
