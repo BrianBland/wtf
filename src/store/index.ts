@@ -328,32 +328,21 @@ export const useStore = create<Store>((set, get) => ({
       }
     }
 
+    // Subscribe before backfilling so the stream starts at page load; the first header
+    // fills the few blocks between eth_blockNumber and the subscription.
+    let latest: number | null = null
     let highestHeader: number | null = null
     try {
-      const latestHex = await client.call<string>('eth_blockNumber', [])
-      if (!isCurrentClient()) return
-      const latest    = parseInt(latestHex, 16)
-      const start     = Math.max(0, latest - BACKFILL_BLOCKS + 1)
-      for (let n = latest; n >= start && isCurrentClient(); n -= BACKFILL_CONCURRENCY) {
-        const chunkStart = Math.max(start, n - BACKFILL_CONCURRENCY + 1)
-        await Promise.all(
-          Array.from({ length: n - chunkStart + 1 }, (_, i) => fetchAndStoreBlock(chunkStart + i))
-        )
-        // Show the newest blocks while older ones keep loading.
-        if (n === latest && isCurrentClient()) set({ initialized: true, latestBlock: latest })
-      }
+      latest = parseInt(await client.call<string>('eth_blockNumber', []), 16)
       if (!isCurrentClient()) return
       highestHeader = latest
-      // Estimate EIP-1559 elasticity from the initial block sample
-      const sorted = get().getSortedBlocks()
-      set({ chainElasticity: sorted.at(-1)?.eip1559?.elasticity ?? estimateElasticity(sorted) })
     } catch (e) {
       if (!isCurrentClient()) return
       // eth_blockNumber itself failed — mark initialized so UI doesn't hang
       set({ initialized: true, connError: `Initial sync failed: ${(e as Error).message}` })
     }
 
-    // ── Phase 3: Subscribe to new heads ─────────────────────────────────────
+    // ── Phase 2: Subscribe to new heads ─────────────────────────────────────
     try {
       await client.subscribe<{ number: string; hash: string }>(
         'newHeads', null, async (header) => {
@@ -387,6 +376,25 @@ export const useStore = create<Store>((set, get) => ({
       if (!isCurrentClient()) return
       set({ connError: `Subscription failed: ${(e as Error).message}` })
     }
+
+    // ── Best-effort history, newest first ───────────────────────────────────
+    const head = latest
+    if (head === null || !isCurrentClient()) return
+    const start = Math.max(0, head - BACKFILL_BLOCKS + 1)
+    for (let n = head; n >= start && isCurrentClient(); n -= BACKFILL_CONCURRENCY) {
+      const chunkStart = Math.max(start, n - BACKFILL_CONCURRENCY + 1)
+      await Promise.all(
+        Array.from({ length: n - chunkStart + 1 }, (_, i) => fetchAndStoreBlock(chunkStart + i))
+      )
+      // Show the newest blocks while older ones keep loading.
+      if (n === head && isCurrentClient()) {
+        set((s) => ({ initialized: true, latestBlock: Math.max(s.latestBlock ?? 0, head) }))
+      }
+    }
+    if (!isCurrentClient()) return
+    // Estimate EIP-1559 elasticity from the initial block sample
+    const sorted = get().getSortedBlocks()
+    set({ chainElasticity: sorted.at(-1)?.eip1559?.elasticity ?? estimateElasticity(sorted) })
   },
 
   disconnect: () => {
