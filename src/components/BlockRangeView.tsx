@@ -1,4 +1,4 @@
-import { useMemo, useState, useRef } from 'react'
+import { useEffect, useMemo, useState, useRef } from 'react'
 import { useStore } from '../store'
 import { Block } from '../types'
 import { buildHistograms, AggMetric } from '../lib/aggregations'
@@ -9,6 +9,7 @@ import { MetaSankeyView } from './MetaSankeyView'
 import { formatGas, formatGwei, formatNumber, formatTimestamp, gasColor } from '../lib/formatters'
 import { KNOWN_PROTOCOLS, PROTOCOL_CLASSIFICATION } from '../lib/protocols'
 import { blockUtilization } from '../lib/baseChain'
+import { SHELF_ROW_BLOCKS, shelfRows } from '../lib/blockShelf'
 
 // ── Sparkline ─────────────────────────────────────────────────────────────
 
@@ -21,14 +22,12 @@ import { blockUtilization } from '../lib/baseChain'
  *
  * `target` = 1/elasticity (e.g. 1/6 ≈ 0.167 for Base/OP Stack)
  * Small sat/lightness variance by block number keeps adjacent bars distinct.
- * Optional `chunkIndex` shifts lightness so stacked chunks are visually separated.
  */
 function sparkBarColor(
   gasRatio:   number,
   blockNumber: number,
   target:     number,
   elasticity: number,
-  chunkIndex?: number,
 ): string {
   let hue: number
   const t0 = Math.max(target, 0.001)
@@ -47,43 +46,64 @@ function sparkBarColor(
   const cycle  = blockNumber % 4
   const sat    = 68 + (cycle & 1) * 14        // 68% or 82%
   const baseLit = 46 + (cycle >> 1) * 10      // 46% or 56%
-  const litAdj = chunkIndex !== undefined ? (chunkIndex % 2) * 8 : 0
-  return `hsl(${hue.toFixed(0)},${sat}%,${(baseLit + litAdj)}%)`
+  return `hsl(${hue.toFixed(0)},${sat}%,${baseLit}%)`
 }
 
-function Sparkline({ blocks, onSelect, metric }: { blocks: Block[]; onSelect: (n: number) => void; metric: AggMetric }) {
+const COLLAPSED_ROWS = 2
+
+function Sparkline({ blocks, onSelect, metric, expanded }: {
+  blocks: Block[]; onSelect: (n: number) => void; metric: AggMetric; expanded: boolean
+}) {
   const chainElasticity = useStore((s) => s.chainElasticity)
   const target = 1 / chainElasticity
 
   const getValue = (b: Block) => metric === 'gas' ? Number(b.gasUsed) : b.transactions.length
-
   const maxVal = Math.max(...blocks.map(getValue), 1)
 
-  const [hovered, setHovered] = useState<{ block: Block; x: number } | null>(null)
+  const rows = useMemo(() => shelfRows(blocks), [blocks])
+  const visibleRows = expanded ? rows : rows.slice(0, COLLAPSED_ROWS)
+  const rowHeight = expanded ? 18 : 28
+
+  const [hovered, setHovered] = useState<{ block: Block; x: number; y: number } | null>(null)
   const containerRef = useRef<HTMLDivElement>(null)
 
   return (
     <div
       ref={containerRef}
-      className="sparkline"
-      style={{ position: 'relative' }}
+      style={{ position: 'relative', display: 'flex', flexDirection: 'column', gap: 3 }}
       onMouseLeave={() => setHovered(null)}
     >
-      {blocks.map((block) => {
-        const v        = getValue(block)
-        const h        = Math.max(2, Math.round((v / maxVal) * 32))
-        const gasRatio = blockUtilization(block)
+      {visibleRows.map(([row, rowBlocks]) => {
+        const first = row * SHELF_ROW_BLOCKS
+        const firstLoaded = rowBlocks.values().next().value as Block
         return (
-          <div
-            key={block.number}
-            className="spark-bar"
-            style={{ height: h, background: sparkBarColor(gasRatio, block.number, target, chainElasticity) }}
-            onClick={() => onSelect(block.number)}
-            onMouseEnter={(e) => {
-              const rect = containerRef.current?.getBoundingClientRect()
-              if (rect) setHovered({ block, x: e.clientX - rect.left })
-            }}
-          />
+          <div key={row} style={{ display: 'flex', alignItems: 'flex-end', gap: 6 }}>
+            <span style={{ fontSize: 9, color: 'var(--text3)', width: 52, flexShrink: 0, fontVariantNumeric: 'tabular-nums' }}>
+              {formatTimestamp(firstLoaded.timestampMs).slice(0, 8)}
+            </span>
+            <div className="sparkline shelf-row" style={{ height: rowHeight, flex: 1 }}>
+              {Array.from({ length: SHELF_ROW_BLOCKS }, (_, i) => {
+                const block = rowBlocks.get(first + i)
+                if (!block) return <span key={i} className="spark-slot" />
+                const h = Math.max(2, Math.round((getValue(block) / maxVal) * rowHeight))
+                return (
+                  <button
+                    key={i}
+                    type="button"
+                    className="spark-bar"
+                    aria-label={`Block ${block.number}`}
+                    style={{ height: h, background: sparkBarColor(blockUtilization(block), block.number, target, chainElasticity) }}
+                    onClick={() => onSelect(block.number)}
+                    onMouseEnter={(e) => {
+                      const rect = containerRef.current?.getBoundingClientRect()
+                      const bar = e.currentTarget.parentElement!.getBoundingClientRect()
+                      if (rect) setHovered({ block, x: e.clientX - rect.left, y: bar.bottom - rect.top })
+                    }}
+                  />
+                )
+              })}
+            </div>
+          </div>
         )
       })}
 
@@ -93,7 +113,7 @@ function Sparkline({ blocks, onSelect, metric }: { blocks: Block[]; onSelect: (n
         return (
           <div style={{
             position: 'absolute',
-            top: 'calc(100% + 4px)',
+            top: hovered.y + 4,
             left: Math.min(hovered.x, (containerRef.current?.clientWidth ?? 9999) - 140),
             background: 'var(--surface2)',
             border: '1px solid var(--border)',
@@ -107,7 +127,7 @@ function Sparkline({ blocks, onSelect, metric }: { blocks: Block[]; onSelect: (n
             lineHeight: 1.6,
           }}>
             <div style={{ fontWeight: 600, color: 'var(--accent)' }}>
-              #{b.number.toLocaleString()}
+              #{b.number.toLocaleString()} <span style={{ color: 'var(--text3)', fontWeight: 400 }}>{formatTimestamp(b.timestampMs)}</span>
             </div>
             <div style={{ color: 'var(--text2)' }}>
               {b.transactions.length} txs · {formatGas(b.gasUsed)}
@@ -133,7 +153,10 @@ function Sparkline({ blocks, onSelect, metric }: { blocks: Block[]; onSelect: (n
   )
 }
 
+
 // ── Block list ────────────────────────────────────────────────────────────
+
+const BLOCK_LIST_ROWS = 200
 
 function BlockListPanel({ blocks, onSelect }: { blocks: Block[]; onSelect: (n: number) => void }) {
   return (
@@ -143,17 +166,17 @@ function BlockListPanel({ blocks, onSelect }: { blocks: Block[]; onSelect: (n: n
         <span className="count">{blocks.length} loaded</span>
       </div>
       <div className="scroll-y" style={{ flex: 1 }}>
-        {[...blocks].reverse().map((block) => {
+        {blocks.slice(-BLOCK_LIST_ROWS).reverse().map((block) => {
           const gasRatio = blockUtilization(block)
           return (
             <div key={block.number} className="data-row" onClick={() => onSelect(block.number)}>
               <span style={{ color: 'var(--accent)', fontWeight: 600, minWidth: 78, fontVariantNumeric: 'tabular-nums' }}>
                 #{block.number.toLocaleString()}
               </span>
-              <span style={{ color: 'var(--text2)', fontSize: 10, minWidth: 52 }}>
+              <span style={{ color: 'var(--text2)', fontSize: 10, minWidth: 64, fontVariantNumeric: 'tabular-nums' }}>
                 {formatTimestamp(block.timestampMs)}
               </span>
-              <span style={{ minWidth: 36, fontVariantNumeric: 'tabular-nums' }}>
+              <span style={{ minWidth: 40, fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>
                 {block.transactions.length}
                 <span className="muted" style={{ fontSize: 9 }}> tx</span>
               </span>
@@ -245,8 +268,28 @@ function ClassifiedProtocolHistogram({ entries, sortBy }: { entries: HistEntry[]
 
 // ── Main view ─────────────────────────────────────────────────────────────
 
+/** Trailing throttle: 5 blocks/s would otherwise re-run every aggregation 5 times a second. */
+function useThrottledValue<T>(value: T, ms: number): T {
+  const [shown, setShown] = useState(value)
+  const lastShownAt = useRef(0)
+  useEffect(() => {
+    const wait = Math.max(0, lastShownAt.current + ms - Date.now())
+    const timer = setTimeout(() => { lastShownAt.current = Date.now(); setShown(value) }, wait)
+    return () => clearTimeout(timer)
+  }, [value, ms])
+  return shown
+}
+
 export function BlockRangeView() {
-  const blocksMap = useStore((s) => s.blocks)
+  const liveBlocks  = useStore((s) => s.blocks)
+  const latestBlock = useStore((s) => s.latestBlock)
+  const throttledBlocks = useThrottledValue(liveBlocks, 1000)
+  // Freeze the feed while the pointer is over it so a block stays put long enough to click.
+  const [pausedBlocks, setPausedBlocks] = useState<Map<number, Block> | null>(null)
+  const blocksMap = pausedBlocks ?? throttledBlocks
+  const pauseFeed  = () => setPausedBlocks((paused) => paused ?? throttledBlocks)
+  const resumeFeed = () => setPausedBlocks(null)
+  const [shelfExpanded, setShelfExpanded] = useState(false)
   const goto      = useStore((s) => s.goto)
   const nav       = useStore((s) => s.nav)
   const [sparkMetric, setSparkMetric] = useState<AggMetric>('txs')
@@ -264,6 +307,12 @@ export function BlockRangeView() {
   )
 
   const handleBlockSelect = (n: number) => goto(carryBlockFilters(nav, { view: 'block', blockNumber: n }))
+  const newWhilePaused = pausedBlocks && latestBlock !== null && blocks.length > 0
+    ? Math.max(0, latestBlock - blocks[blocks.length - 1].number)
+    : 0
+  const shelfSeconds = blocks.length > 1
+    ? Math.round((blocks[blocks.length - 1].timestampMs - blocks[0].timestampMs) / 1000)
+    : 0
 
   if (blocks.length === 0) {
     return (
@@ -281,11 +330,27 @@ export function BlockRangeView() {
         <div className="panel" style={{ padding: '8px 12px' }}>
           <SummaryStats blocks={blocks} />
         </div>
-        <div className="panel" style={{ flex: 1, padding: '8px 12px', display: 'flex', flexDirection: 'column', gap: 4 }}>
+        <div
+          className="panel"
+          style={{ flex: 1, padding: '8px 12px', display: 'flex', flexDirection: 'column', gap: 4, minWidth: 0 }}
+          onMouseEnter={pauseFeed}
+          onMouseLeave={resumeFeed}
+        >
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <span style={{ fontSize: 10, color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: '0.06em', flex: 1 }}>
-              {sparkMetric === 'gas' ? 'Gas / block' : 'Tx / block'} — click to inspect
+              {sparkMetric === 'gas' ? 'Gas / block' : 'Tx / block'} — 30s per row, click to inspect
             </span>
+            {pausedBlocks && (
+              <span style={{ fontSize: 9, color: 'var(--amber)' }}>
+                ⏸ paused{newWhilePaused > 0 ? ` · ${newWhilePaused} new` : ''}
+              </span>
+            )}
+            <button
+              className={`topbar-btn ${shelfExpanded ? 'active' : ''}`}
+              style={{ fontSize: 9, padding: '1px 7px' }}
+              title={shelfExpanded ? 'Show the last minute' : 'Show every loaded block'}
+              onClick={() => setShelfExpanded((e) => !e)}
+            >{shelfExpanded ? `all ${Math.floor(shelfSeconds / 60)}m${shelfSeconds % 60}s ▲` : 'more ▼'}</button>
             <button
               className={`topbar-btn ${sparkMetric === 'txs' ? 'active' : ''}`}
               style={{ fontSize: 9, padding: '1px 7px' }}
@@ -297,7 +362,7 @@ export function BlockRangeView() {
               onClick={() => setSparkMetric('gas')}
             >gas</button>
           </div>
-          <Sparkline blocks={blocks} onSelect={handleBlockSelect} metric={sparkMetric} />
+          <Sparkline blocks={blocks} onSelect={handleBlockSelect} metric={sparkMetric} expanded={shelfExpanded} />
         </div>
       </div>
 
@@ -335,8 +400,10 @@ export function BlockRangeView() {
       </div>
 
       {/* Main: block list + 3 histograms */}
-      <div style={{ display: 'grid', gridTemplateColumns: '200px 1fr 1fr 1fr', gap: 8, flex: 1, overflow: 'hidden', minHeight: 0 }}>
-        <BlockListPanel blocks={blocks} onSelect={handleBlockSelect} />
+      <div style={{ display: 'grid', gridTemplateColumns: '260px 1fr 1fr 1fr', gap: 8, flex: 1, overflow: 'hidden', minHeight: 0 }}>
+        <div onMouseEnter={pauseFeed} onMouseLeave={resumeFeed} style={{ minHeight: 0, height: '100%' }}>
+          <BlockListPanel blocks={blocks} onSelect={handleBlockSelect} />
+        </div>
 
         {/* Senders */}
         <div className="panel" style={{ display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
