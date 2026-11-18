@@ -10,7 +10,11 @@ import { loadBlockData } from '../lib/blockProcessing'
 import { RpcClient } from '../lib/rpc'
 import { estimateElasticity } from '../lib/chainParams'
 
-const MAX_BLOCKS = 200
+// ~400s of Denim 200ms blocks.
+const MAX_BLOCKS = 2000
+const BACKFILL_BLOCKS = 100
+const BACKFILL_CONCURRENCY = 10
+const MAX_GAP_FILL = 50
 
 function withMapValue<K, V>(map: Map<K, V>, key: K, value: V): Map<K, V> {
   const next = new Map(map)
@@ -324,16 +328,22 @@ export const useStore = create<Store>((set, get) => ({
       }
     }
 
+    let highestHeader: number | null = null
     try {
       const latestHex = await client.call<string>('eth_blockNumber', [])
       if (!isCurrentClient()) return
       const latest    = parseInt(latestHex, 16)
-      const start     = Math.max(0, latest - 9)
-      await Promise.all(
-        Array.from({ length: latest - start + 1 }, (_, i) => fetchAndStoreBlock(start + i))
-      )
+      const start     = Math.max(0, latest - BACKFILL_BLOCKS + 1)
+      for (let n = latest; n >= start && isCurrentClient(); n -= BACKFILL_CONCURRENCY) {
+        const chunkStart = Math.max(start, n - BACKFILL_CONCURRENCY + 1)
+        await Promise.all(
+          Array.from({ length: n - chunkStart + 1 }, (_, i) => fetchAndStoreBlock(chunkStart + i))
+        )
+        // Show the newest blocks while older ones keep loading.
+        if (n === latest && isCurrentClient()) set({ initialized: true, latestBlock: latest })
+      }
       if (!isCurrentClient()) return
-      set({ initialized: true, latestBlock: latest })
+      highestHeader = latest
       // Estimate EIP-1559 elasticity from the initial block sample
       const sorted = get().getSortedBlocks()
       set({ chainElasticity: sorted.at(-1)?.eip1559?.elasticity ?? estimateElasticity(sorted) })
@@ -350,15 +360,24 @@ export const useStore = create<Store>((set, get) => ({
           if (!isCurrentClient()) return
           try {
             const blockNumber = parseInt(header.number, 16)
+            // Backfill blocks missed during initial sync or a dropped subscription.
+            // Tracks headers seen, not blocks loaded, so in-flight blocks aren't fetched twice.
+            if (highestHeader !== null) {
+              for (let n = Math.max(highestHeader + 1, blockNumber - MAX_GAP_FILL); n < blockNumber; n++) {
+                void fetchAndStoreBlock(n)
+              }
+            }
+            highestHeader = Math.max(highestHeader ?? 0, blockNumber)
             const loaded = await loadBlockData(client, blockNumber, get().poolCache, get().v4PoolKeyCache)
             if (!loaded || !isCurrentClient()) return
             applyPoolMeta(set, loaded.newMeta)
             applyV4PoolKeys(set, loaded.newV4PoolKeys)
             get().addBlock(loaded.block)
-            set({
-              latestBlock: loaded.block.number,
+            // Concurrent fetches can finish out of order at 5 blocks/s.
+            set((s) => ({
+              latestBlock: Math.max(s.latestBlock ?? 0, loaded.block.number),
               ...(loaded.block.eip1559 && { chainElasticity: loaded.block.eip1559.elasticity }),
-            })
+            }))
           } catch (e) {
             console.error('Block fetch error', header.number, e)
           }
