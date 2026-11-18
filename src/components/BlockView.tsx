@@ -18,6 +18,7 @@ import { DecodedCallView } from './TxView'
 import { carryBlockFilters } from '../lib/urlState'
 import { KNOWN_TOKENS, KNOWN_PROTOCOLS, KNOWN_SELECTORS } from '../lib/protocols'
 import { formatEth, formatGas, formatGwei, formatTimestamp, formatAge, formatNumber, shortHash } from '../lib/formatters'
+import { systemTxLabel } from '../lib/baseChain'
 import { TipRise, effectivePriorityFee, findTipRises, txGasUsed } from '../lib/txMetrics'
 import { classifyB20Address } from '../lib/b20'
 
@@ -109,11 +110,13 @@ function BlockHeader({ blockNumber, blockFilters }: { blockNumber: number; block
       {block && (
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', borderBottom: '1px solid var(--border)' }}>
           {[
-            { label: 'Time',     value: `${formatTimestamp(block.timestamp)} · ${formatAge(block.timestamp)}` },
+            { label: 'Time',     value: `${formatTimestamp(block.timestampMs)} · ${formatAge(block.timestamp)}` },
             { label: 'Txs',      value: formatNumber(block.transactions.length) },
-            { label: 'Gas Used', value: formatGas(block.gasUsed) },
+            { label: 'Gas Used', value: `${formatGas(block.gasUsed)}${block.daFootprint !== undefined ? ` · DA ${formatGas(block.daFootprint)}` : ''}` },
             { label: 'Gas Limit',value: formatGas(block.gasLimit) },
-            { label: 'Base Fee', value: block.baseFeePerGas > 0n ? formatGwei(block.baseFeePerGas) : '—' },
+            { label: 'Base Fee', value: block.baseFeePerGas > 0n
+              ? `${formatGwei(block.baseFeePerGas)}${block.eip1559?.minBaseFee === block.baseFeePerGas ? ' (floor)' : ''}`
+              : '—' },
           ].map(({ label, value }) => (
             <div key={label} style={{ padding: '5px 12px', borderRight: '1px solid var(--border)' }}>
               <div className="stat-label">{label}</div>
@@ -293,6 +296,7 @@ function TxRow({ tx, baseFee, tipRise, selected, onClick }: { tx: Transaction; b
   const createdContract = tx.deployments.find((deployment) => deployment.kind === 'contract')
   const b20DeploymentCount = tx.deployments.filter((deployment) => deployment.kind === 'b20').length
   const dimStyle  = reverted ? { opacity: 0.6 } : undefined
+  const systemLabel = systemTxLabel(tx)
 
   return (
     <div className={`data-row ${selected ? 'selected' : ''} ${tipRise ? 'tip-rise' : ''}`} onClick={onClick}>
@@ -319,6 +323,7 @@ function TxRow({ tx, baseFee, tipRise, selected, onClick }: { tx: Transaction; b
                 {reverted ? 'deploy failed' : 'deploy unconfirmed'}
               </span>}
         <span className="muted" style={{ fontSize: 9, flexShrink: 0 }}>·</span>
+        {systemLabel && <span className="badge muted" style={{ flexShrink: 0 }}>{systemLabel}</span>}
         <SelectorTag selector={tx.methodSelector} inputHex={tx.input} />
         {b20DeploymentCount > 0 && (
           <span className="badge muted" style={{ flexShrink: 0 }}>

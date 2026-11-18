@@ -72,13 +72,15 @@ export function formatPercent(num: number, denom: number, decimals = 1): string 
   return `${((num / denom) * 100).toFixed(decimals)}%`
 }
 
-export function formatTimestamp(ts: number): string {
-  return new Date(ts * 1000).toLocaleTimeString('en-US', {
+/** HH:MM:SS.s — tenths distinguish Denim's 200ms blocks. */
+export function formatTimestamp(ms: number): string {
+  const time = new Date(ms).toLocaleTimeString('en-US', {
     hour12: false,
     hour: '2-digit',
     minute: '2-digit',
     second: '2-digit',
   })
+  return `${time}.${Math.floor((ms % 1000) / 100)}`
 }
 
 export function formatAge(ts: number): string {

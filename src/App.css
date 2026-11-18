@@ -326,6 +326,9 @@ a { color: var(--accent); text-decoration: none; }
   transition: opacity 0.1s;
 }
 .spark-bar:hover { opacity: 1; }
+.shelf-row { gap: 1px; }
+.shelf-row .spark-bar { min-width: 0; border: 0; padding: 0; }
+.spark-slot { flex: 1; min-width: 0; }
 
 /* ── Range view ──────────────────────────────────────────────────────────── */
 .range-layout {

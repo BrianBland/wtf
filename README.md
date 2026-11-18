@@ -4,7 +4,7 @@ A real-time Ethereum block explorer and DeFi transaction analyzer. Connect to an
 
 ## What it does
 
-**Block range view** — Live feed of incoming blocks with a sparkline (gas or tx count), summary stats, sender/recipient/method histograms, a value flow Sankey, and per-protocol drill-down.
+**Block range view** — Live feed of the last ~2000 blocks (~400s at 200ms). A sparkline shelf (gas or tx count) shows 30s per row, aligned to block numbers so bars don't shift; it shows the last minute, expands to every loaded block, and pauses while the pointer is over it or the block list. Also summary stats, sender/recipient/method histograms, a value flow Sankey, and per-protocol drill-down.
 
 **Block view** — Deep-dive into any block:
 - **Tx aggregations** — senders, recipients, method selectors, protocol breakdown
@@ -15,6 +15,15 @@ A real-time Ethereum block explorer and DeFi transaction analyzer. Connect to an
 - **Cross-tx account patterns** — accounts that appear in multiple transactions (round-trips, borrow/repay, LP add/remove, multi-swap)
 
 **Tx view** — Full transaction detail: value flows, logs, call trace, state diff.
+
+## Base protocol support
+
+Tracks Base upgrades through Denim (200ms blocks):
+- System deposits are labelled: `tx[0]` L1 info (`0x4200…0015`) and, since Denim, `tx[1]` BaseTime (`0x4200…0030`), whose calldata supplies the block's sub-second timestamp.
+- EIP-1559 elasticity, denominator and minimum base fee are read from Holocene/Jovian header `extraData`.
+- Utilization uses `max(gasUsed, DA footprint)` on Jovian+ blocks, matching the base fee rule.
+- Tips are the receipt's `effectiveGasPrice − baseFee`; total fees include the L1 data fee.
+- Base predeploys and native precompiles (fee vaults, BaseTime, B20 registry/policy, nonce manager, tx context) are labelled.
 
 ## Tech stack
 

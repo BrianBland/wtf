@@ -1,3 +1,5 @@
+import { BASE_SYSTEM_CONTRACTS, BASE_SYSTEM_SELECTORS } from './baseChain'
+
 // Known Base chain addresses, tokens, protocols, and event signatures
 
 export interface TokenInfo {
@@ -30,6 +32,7 @@ export interface ProtocolInfo {
 }
 
 export const KNOWN_PROTOCOLS: Record<string, ProtocolInfo> = {
+  ...Object.fromEntries(Object.entries(BASE_SYSTEM_CONTRACTS).map(([addr, name]) => [addr, { name, type: 'other' as const }])),
   // Uniswap V3
   '0x2626664c2603336e57b271c5c0b26f421741e481': { name: 'Uniswap V3 Router',  type: 'dex' },
   '0x33128a8fc17869897dce68ed026d694621f6fdfd': { name: 'Uniswap V3 Factory', type: 'dex' },
@@ -275,6 +278,7 @@ export const LZ_EID_NAMES: Record<number, string> = {
 
 // 4-byte method selectors
 export const KNOWN_SELECTORS: Record<string, string> = {
+  ...BASE_SYSTEM_SELECTORS,
   // ERC20
   '0xa9059cbb': 'transfer',
   '0x23b872dd': 'transferFrom',
