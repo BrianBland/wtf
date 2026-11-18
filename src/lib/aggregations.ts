@@ -1,6 +1,7 @@
 import { Block } from '../types'
 import { HistEntry } from '../components/Histogram'
 import { txGasUsed } from './txMetrics'
+import { DEPOSITOR_ACCOUNT } from './baseChain'
 
 export type AggMetric = 'txs' | 'gas'
 
@@ -13,7 +14,7 @@ export interface BlockHistograms {
 
 /** Aggregate histogram data across one or more blocks.
  *  Always computes both tx count and Kgas (gasUsed / 1000, falls back to gasLimit) per entry.
- *  Protocols deduplicate per-tx to avoid counting gas N times for N events in one tx.
+ *  System deposits are skipped. Protocols deduplicate per-tx to avoid counting gas N times for N events in one tx.
  */
 export function buildHistograms(blocks: Block[]): BlockHistograms {
   type Acc = { count: number; gas: number }
@@ -29,6 +30,8 @@ export function buildHistograms(blocks: Block[]): BlockHistograms {
 
   for (const block of blocks) {
     for (const tx of block.transactions) {
+      // L1-info and BaseTime deposits appear in every block and would top every histogram.
+      if (tx.from === DEPOSITOR_ACCOUNT) continue
       const kgas = Number(txGasUsed(tx)) / 1000
       add(senders, tx.from, kgas)
       if (tx.to) add(recipients, tx.to, kgas)

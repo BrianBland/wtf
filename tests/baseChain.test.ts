@@ -89,3 +89,9 @@ describe('decodeEip1559Params', () => {
     assert.equal(block.daFootprint, undefined)
   })
 })
+
+test('histograms skip system deposits but keep user deposits', async () => {
+  const { buildHistograms } = await import('../src/lib/aggregations')
+  const { senders } = buildHistograms([denimBlock()])
+  assert.deepEqual(senders.map((e) => e.key).sort(), [`0x${'aa'.repeat(20)}`, `0x${'cc'.repeat(20)}`])
+})
