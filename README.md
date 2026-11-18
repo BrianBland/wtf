@@ -4,7 +4,7 @@ A real-time Ethereum block explorer and DeFi transaction analyzer. Connect to an
 
 ## What it does
 
-**Block range view** — Live feed of the last ~2000 blocks (~400s at 200ms). A sparkline shelf (gas or tx count) shows 30s per row, aligned to block numbers so bars don't shift; it shows the last minute, expands to every loaded block, and pauses while the pointer is over it or the block list. Also summary stats, sender/recipient/method histograms, a value flow Sankey, and per-protocol drill-down.
+**Block range view** — Live feed of the last ~2000 blocks (~400s at 200ms). A sparkline shelf (gas or tx count) shows 30s per row, aligned to block numbers so bars don't shift; it shows the last minute and expands to every loaded block. The block list pauses while the pointer is over it. Also summary stats, sender/recipient/method histograms, a value flow Sankey, and per-protocol drill-down.
 
 **Block view** — Deep-dive into any block:
 - **Tx aggregations** — senders, recipients, method selectors, protocol breakdown

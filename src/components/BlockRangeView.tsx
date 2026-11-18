@@ -158,12 +158,16 @@ function Sparkline({ blocks, onSelect, metric, expanded }: {
 
 const BLOCK_LIST_ROWS = 200
 
-function BlockListPanel({ blocks, onSelect }: { blocks: Block[]; onSelect: (n: number) => void }) {
+function BlockListPanel({ blocks, onSelect, newWhilePaused }: {
+  blocks: Block[]; onSelect: (n: number) => void; newWhilePaused: number | null
+}) {
   return (
     <div className="panel" style={{ display: 'flex', flexDirection: 'column', overflow: 'hidden', height: '100%' }}>
       <div className="panel-header">
         Blocks
-        <span className="count">{blocks.length} loaded</span>
+        {newWhilePaused !== null
+          ? <span className="count" style={{ color: 'var(--amber)' }}>⏸ paused{newWhilePaused > 0 ? ` · ${newWhilePaused} new` : ''}</span>
+          : <span className="count">{blocks.length} loaded</span>}
       </div>
       <div className="scroll-y" style={{ flex: 1 }}>
         {blocks.slice(-BLOCK_LIST_ROWS).reverse().map((block) => {
@@ -268,7 +272,7 @@ function ClassifiedProtocolHistogram({ entries, sortBy }: { entries: HistEntry[]
 
 // ── Main view ─────────────────────────────────────────────────────────────
 
-/** Trailing throttle: 5 blocks/s would otherwise re-run every aggregation 5 times a second. */
+/** Trailing throttle for the aggregations, which would otherwise re-run 5 times a second. */
 function useThrottledValue<T>(value: T, ms: number): T {
   const [shown, setShown] = useState(value)
   const lastShownAt = useRef(0)
@@ -284,11 +288,9 @@ export function BlockRangeView() {
   const liveBlocks  = useStore((s) => s.blocks)
   const latestBlock = useStore((s) => s.latestBlock)
   const throttledBlocks = useThrottledValue(liveBlocks, 1000)
-  // Freeze the feed while the pointer is over it so a block stays put long enough to click.
-  const [pausedBlocks, setPausedBlocks] = useState<Map<number, Block> | null>(null)
-  const blocksMap = pausedBlocks ?? throttledBlocks
-  const pauseFeed  = () => setPausedBlocks((paused) => paused ?? throttledBlocks)
-  const resumeFeed = () => setPausedBlocks(null)
+  // New rows push the block list down 5 times a second, so it freezes under the pointer.
+  // Shelf bars never move sideways, so the shelf keeps streaming.
+  const [pausedList, setPausedList] = useState<Block[] | null>(null)
   const [shelfExpanded, setShelfExpanded] = useState(false)
   const goto      = useStore((s) => s.goto)
   const nav       = useStore((s) => s.nav)
@@ -297,9 +299,14 @@ export function BlockRangeView() {
   const [col4, setCol4] = useState<'methods' | 'activity'>('methods')
   const [showSankey,    setShowSankey]    = useState(false)
   const [sankeyExpanded, setSankeyExpanded] = useState(false)
+  // The shelf and block list stream every block; heavier aggregations update once a second.
+  const feedBlocks = useMemo(
+    () => [...liveBlocks.values()].sort((a, b) => a.number - b.number),
+    [liveBlocks]
+  )
   const blocks = useMemo(
-    () => [...blocksMap.values()].sort((a, b) => a.number - b.number),
-    [blocksMap]
+    () => [...throttledBlocks.values()].sort((a, b) => a.number - b.number),
+    [throttledBlocks]
   )
   const { senders, recipients, selectors, protocols } = useMemo(
     () => buildHistograms(blocks),
@@ -307,11 +314,14 @@ export function BlockRangeView() {
   )
 
   const handleBlockSelect = (n: number) => goto(carryBlockFilters(nav, { view: 'block', blockNumber: n }))
-  const newWhilePaused = pausedBlocks && latestBlock !== null && blocks.length > 0
-    ? Math.max(0, latestBlock - blocks[blocks.length - 1].number)
-    : 0
-  const shelfSeconds = blocks.length > 1
-    ? Math.round((blocks[blocks.length - 1].timestampMs - blocks[0].timestampMs) / 1000)
+  const pauseList  = () => setPausedList((paused) => paused ?? feedBlocks)
+  const resumeList = () => setPausedList(null)
+  const lastPaused = pausedList?.[pausedList.length - 1]
+  const newWhilePaused = pausedList
+    ? Math.max(0, (latestBlock ?? 0) - (lastPaused?.number ?? latestBlock ?? 0))
+    : null
+  const shelfSeconds = feedBlocks.length > 1
+    ? Math.round((feedBlocks[feedBlocks.length - 1].timestampMs - feedBlocks[0].timestampMs) / 1000)
     : 0
 
   if (blocks.length === 0) {
@@ -333,18 +343,11 @@ export function BlockRangeView() {
         <div
           className="panel"
           style={{ flex: 1, padding: '8px 12px', display: 'flex', flexDirection: 'column', gap: 4, minWidth: 0 }}
-          onMouseEnter={pauseFeed}
-          onMouseLeave={resumeFeed}
         >
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <span style={{ fontSize: 10, color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: '0.06em', flex: 1 }}>
               {sparkMetric === 'gas' ? 'Gas / block' : 'Tx / block'} — 30s per row, click to inspect
             </span>
-            {pausedBlocks && (
-              <span style={{ fontSize: 9, color: 'var(--amber)' }}>
-                ⏸ paused{newWhilePaused > 0 ? ` · ${newWhilePaused} new` : ''}
-              </span>
-            )}
             <button
               className={`topbar-btn ${shelfExpanded ? 'active' : ''}`}
               style={{ fontSize: 9, padding: '1px 7px' }}
@@ -362,7 +365,7 @@ export function BlockRangeView() {
               onClick={() => setSparkMetric('gas')}
             >gas</button>
           </div>
-          <Sparkline blocks={blocks} onSelect={handleBlockSelect} metric={sparkMetric} expanded={shelfExpanded} />
+          <Sparkline blocks={feedBlocks} onSelect={handleBlockSelect} metric={sparkMetric} expanded={shelfExpanded} />
         </div>
       </div>
 
@@ -401,8 +404,8 @@ export function BlockRangeView() {
 
       {/* Main: block list + 3 histograms */}
       <div style={{ display: 'grid', gridTemplateColumns: '260px 1fr 1fr 1fr', gap: 8, flex: 1, overflow: 'hidden', minHeight: 0 }}>
-        <div onMouseEnter={pauseFeed} onMouseLeave={resumeFeed} style={{ minHeight: 0, height: '100%' }}>
-          <BlockListPanel blocks={blocks} onSelect={handleBlockSelect} />
+        <div onMouseEnter={pauseList} onMouseLeave={resumeList} style={{ minHeight: 0, height: '100%' }}>
+          <BlockListPanel blocks={pausedList ?? feedBlocks} onSelect={handleBlockSelect} newWhilePaused={newWhilePaused} />
         </div>
 
         {/* Senders */}
