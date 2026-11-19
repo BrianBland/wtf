@@ -47,11 +47,8 @@ export function keyToHsl(key: string): string {
   return `hsl(${hue}, ${sat}%, ${lit}%)`
 }
 
-/** Kept for callers that expect hexToHsl by name */
-export const hexToHsl = keyToHsl
-
 /** Return suitable foreground color for a given HSL background */
-export function contrastColor(hsl: string): string {
+function contrastColor(hsl: string): string {
   const m = hsl.match(/hsl\(\d+,\s*\d+%,\s*(\d+)%\)/)
   if (!m) return '#f0f0f0'
   return parseInt(m[1]) > 58 ? '#0a0a0a' : '#f0f0f0'
@@ -61,16 +58,6 @@ export function contrastColor(hsl: string): string {
 export function hexColors(key: string): { bg: string; text: string } {
   const bg = keyToHsl(key)
   return { bg, text: contrastColor(bg) }
-}
-
-/** Protocol type-category → color mapping (dex/lending/token/…).
- *  For per-protocol brand colors keyed by name, see PROTOCOL_COLORS in lib/protocols.ts. */
-export const PROTOCOL_TYPE_COLORS: Record<string, string> = {
-  dex:     '#00e5ff',
-  lending: '#ff9100',
-  token:   '#69f0ae',
-  bridge:  '#ce93d8',
-  other:   '#90a4ae',
 }
 
 export const ACTION_COLORS: Record<string, string> = {

@@ -6,13 +6,13 @@ import {
   UNI_V3_INCREASE_LIQ_TOPIC, UNI_V3_DECREASE_LIQ_TOPIC, UNI_V3_COLLECT_TOPIC, UNI_V3_POOL_COLLECT_TOPIC,
 } from './protocols'
 
-export interface AbiInput {
+interface AbiInput {
   name: string
   type: string
   components?: AbiInput[]  // for tuple and tuple[]
 }
 
-export interface AbiFn {
+interface AbiFn {
   name: string
   inputs: AbiInput[]
 }
@@ -613,8 +613,6 @@ export function decodeCalldata(input: string, selector: string): DecodedCall | n
   }
 }
 
-export { ABI_MAP }
-
 export function hasKnownFunctionAbi(selector: string): boolean {
   return selector.toLowerCase() in ABI_MAP
 }
@@ -631,7 +629,7 @@ export function sigMatchesCalldata(sig: string, inputHex: string): boolean {
 
 // ── Event types ────────────────────────────────────────────────────────────
 
-export interface AbiEventInput extends AbiInput {
+interface AbiEventInput extends AbiInput {
   indexed: boolean
 }
 

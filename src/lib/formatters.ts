@@ -114,7 +114,7 @@ export function getSelector(input: string): string | null {
 }
 
 // Signed int256 (two's complement)
-export function toSignedBigInt(hex: string): bigint {
+function toSignedBigInt(hex: string): bigint {
   const val = BigInt(hex)
   const max = 2n ** 255n
   return val >= max ? val - 2n ** 256n : val

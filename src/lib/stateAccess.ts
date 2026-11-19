@@ -5,7 +5,7 @@
 
 // ── Raw RPC response shapes ───────────────────────────────────────────────────
 
-export type PrestateAccount = {
+type PrestateAccount = {
   balance?: string
   nonce?: number
   code?: string

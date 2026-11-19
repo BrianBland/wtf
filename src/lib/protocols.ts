@@ -177,7 +177,6 @@ export const COMPOUND3_ADDRESSES = new Set([
 export const USDC_ADDRESS  = '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913'
 export const USDT_ADDRESS  = '0xfde4c96c8593536e31f229ea8f37b2ada2699bb2'
 export const WETH_ADDRESS  = '0x4200000000000000000000000000000000000006'
-export const CBBTC_ADDRESS = '0xcbb7c0000ab88b473b1f5afd9ef808440eed33bf'
 
 // Avantis perps DEX — main trading/settlement contract
 export const AVANTIS_TRADING_ADDRESS = '0x0c16ff40065cc3ab4bc55b60e447504afb9c7970'
@@ -332,7 +331,7 @@ export const USER_OPERATION_EVENT_TOPIC = '0x49628fd1471006c1482da88028e9ce4dbb0
 
 // ERC20 Transfer — topic0
 export const TRANSFER_TOPIC   = '0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef'
-export const APPROVAL_TOPIC   = '0x8c5be1e5ebec7d5bd14f71427d1e84f3dd0314c0f7b2291e5b200ac8c7c3b925'
+const APPROVAL_TOPIC   = '0x8c5be1e5ebec7d5bd14f71427d1e84f3dd0314c0f7b2291e5b200ac8c7c3b925'
 // Uniswap V3 Swap(address,address,int256,int256,uint160,uint128,int24)
 export const UNI_V3_SWAP_TOPIC    = '0xc42079f94a6350d7e6235f29174924f928cc2ac818eb64fed8004e115fbcca67'
 // PancakeSwap V3 Swap — same fields + uint128 protocolFeesToken0, uint128 protocolFeesToken1
@@ -396,14 +395,14 @@ export const MORPHO_WITHDRAW_COLLATERAL_TOPIC = '0xe80ebd7cc9223d7382aab2e0d1d61
 export const MORPHO_LIQUIDATE_TOPIC           = '0xa4946ede45d0c6f06a0f5ce92c9ad3b4751452d2fe0e25010783bcab57a67e41'
 // WETH wrap/unwrap events (canonical WETH9 and ERC-4626 WETH)
 // Deposit(address indexed dst, uint256 wad) — emitted on wrap (ETH → WETH)
-export const WETH_DEPOSIT_TOPIC    = '0xe1fffcc4923d04b559f4d29a8bfc6cda04eb5b0d3c460751c2402c5c5cc9109c'
+const WETH_DEPOSIT_TOPIC    = '0xe1fffcc4923d04b559f4d29a8bfc6cda04eb5b0d3c460751c2402c5c5cc9109c'
 // Withdrawal(address indexed src, uint256 wad) — emitted on unwrap (WETH → ETH)
-export const WETH_WITHDRAWAL_TOPIC = '0x7fcf532c15f0a6db0bd6d0e038bea71d30d808c7d98cb3bf7268a95bf5081b65'
+const WETH_WITHDRAWAL_TOPIC = '0x7fcf532c15f0a6db0bd6d0e038bea71d30d808c7d98cb3bf7268a95bf5081b65'
 // Euler V2 EVault events (ERC-4626 + custom borrow/repay)
 // Deposit(address indexed caller, address indexed owner, uint256 assets, uint256 shares)
-export const EULER_DEPOSIT_TOPIC  = '0xdcbc1c05240f31ff3ad067ef1ee35ce4997762752e3a095284754544f4c709d7'
+const EULER_DEPOSIT_TOPIC  = '0xdcbc1c05240f31ff3ad067ef1ee35ce4997762752e3a095284754544f4c709d7'
 // Withdraw(address indexed caller, address indexed receiver, address indexed owner, uint256 assets, uint256 shares)
-export const EULER_WITHDRAW_TOPIC = '0xfbde797d201c681b91056529119e0b02407c7bb96a4a2c75c01fc9667232c8db'
+const EULER_WITHDRAW_TOPIC = '0xfbde797d201c681b91056529119e0b02407c7bb96a4a2c75c01fc9667232c8db'
 // Borrow(address indexed account, uint256 assets)
 export const EULER_BORROW_TOPIC   = '0xcbc04eca7e9da35cb1393a6135a199ca52e450d5e9251cbd99f7847d33a36750'
 // Repay(address indexed account, uint256 assets)

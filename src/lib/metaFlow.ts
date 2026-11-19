@@ -21,13 +21,13 @@ function cbBTCToUSDish(sats: bigint): bigint {
   return sats * 1_000n
 }
 
-export function toUSDish(usdcAmt: bigint, wethAmt: bigint, cbBTCAmt: bigint): bigint {
+function toUSDish(usdcAmt: bigint, wethAmt: bigint, cbBTCAmt: bigint): bigint {
   return usdcAmt + wethToUSDish(wethAmt) + cbBTCToUSDish(cbBTCAmt)
 }
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
-export interface MetaNode {
+interface MetaNode {
   id:       string
   totalUSD: bigint  // micro-USDC for sizing
 }
