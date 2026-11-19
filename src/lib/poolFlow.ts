@@ -1,5 +1,4 @@
 import { Block } from '../types'
-import { compareBigIntDesc } from './bigintMath'
 
 export interface AddrTokenFlow {
   address: string
