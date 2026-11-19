@@ -188,14 +188,18 @@ export async function loadBlockData(
   v4PoolKeyCache: Map<string, V4PoolKey> = new Map(),
 ): Promise<LoadedBlockData | null> {
   const hexN = `0x${blockNumber.toString(16)}`
-  const [raw, rawLogs, rawReceipts] = await Promise.all([
+  const [raw, rawReceipts] = await Promise.all([
     client.call<RawBlock>('eth_getBlockByNumber', [hexN, true]),
-    client.call<RawLog[]>('eth_getLogs', [{ fromBlock: hexN, toBlock: hexN }]),
     client.call<RawReceipt[]>('eth_getBlockReceipts', [hexN]).catch(() => null),
   ])
   if (!raw) return null
 
-  const logs = rawLogs ?? []
+  // Receipts already carry every log; eth_getLogs is only needed when they are missing.
+  const receiptsHaveLogs = rawReceipts?.length === raw.transactions.length
+    && rawReceipts.every((r) => Array.isArray(r.logs))
+  const logs = receiptsHaveLogs
+    ? rawReceipts.flatMap((r) => r.logs ?? [])
+    : await client.call<RawLog[]>('eth_getLogs', [{ fromBlock: hexN, toBlock: hexN }]) ?? []
   const [{ protocols: poolProtocols, newMeta }, newV4PoolKeys] = await Promise.all([
     fetchV3PoolProtocols(client, logs, poolCache, hexN),
     // Pin the PositionManager poolKeys() fallback to this block when practical.
