@@ -511,7 +511,7 @@ describe('V4 resolver hardening', () => {
       assert.equal(result.block.transactions[0].protocols[0].extra?.tokenIn, undefined)
       assert.equal(result.block.transactions[0].protocols[0].extra?.amount0, '-1')
       assert.deepEqual(client.calls.map(c => c.method), [
-        'eth_getBlockByNumber', 'eth_getLogs', 'eth_getBlockReceipts', 'eth_chainId',
+        'eth_getBlockByNumber', 'eth_getBlockReceipts', 'eth_getLogs', 'eth_chainId',
         ...(chainId === '0x2105' ? ['eth_call'] : []),
       ])
     }

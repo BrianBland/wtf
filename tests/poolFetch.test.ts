@@ -180,7 +180,7 @@ test('deduplicates the same client, pool, and block request while it is in fligh
   assert.deepEqual(results[1], results[2])
 })
 
-test('does not deduplicate across clients or historical block tags', async () => {
+test('deduplicates across block tags but not across clients', async () => {
   let firstCalls = 0
   let secondCalls = 0
   const first = clientFrom(async (_method, params) => {
@@ -198,7 +198,7 @@ test('does not deduplicate across clients or historical block tags', async () =>
     fetchPoolMeta(first, POOL, '0x51'),
     fetchPoolMeta(second, POOL, '0x50'),
   ])
-  assert.equal(firstCalls, 6)
+  assert.equal(firstCalls, 3)
   assert.equal(secondCalls, 3)
 })
 
@@ -262,7 +262,7 @@ test('loadBlockData pins pool calls to the event block and survives optional met
   const client = clientFrom(async (method, params) => {
     if (method === 'eth_getBlockByNumber') return rawBlock
     if (method === 'eth_getLogs') return [poolLog()]
-    if (method === 'eth_getBlockReceipts') return []
+    if (method === 'eth_getBlockReceipts') return null
     if (method === 'eth_call') {
       ethCallTags.push(params[1])
       throw new Error('archive node temporarily unavailable')
@@ -275,4 +275,34 @@ test('loadBlockData pins pool calls to the event block and survives optional met
   assert.equal(loaded.block.number, 42)
   assert.equal(loaded.newMeta.size, 0)
   assert.deepEqual(ethCallTags, ['0x2a', '0x2a', '0x2a'])
+})
+
+test('loadBlockData reads logs from block receipts without calling eth_getLogs', async () => {
+  const txHash = '0x' + '22'.repeat(32)
+  const rawBlock = {
+    number: '0x2a',
+    hash: '0x' + '33'.repeat(32),
+    parentHash: '0x' + '44'.repeat(32),
+    timestamp: '0x1',
+    gasUsed: '0x0',
+    gasLimit: '0x1',
+    miner: TOKEN0,
+    transactions: [{
+      hash: txHash, from: TOKEN0, to: POOL, value: '0x0', input: '0x', gas: '0x5208',
+      gasPrice: '0x1', nonce: '0x0', transactionIndex: '0x0', type: '0x0',
+    }],
+  } as unknown as RawBlock
+  const methods: string[] = []
+  const client = clientFrom(async (method, params) => {
+    methods.push(method)
+    if (method === 'eth_getBlockByNumber') return rawBlock
+    if (method === 'eth_getBlockReceipts') return [{ transactionHash: txHash, gasUsed: '0x5208', logs: [poolLog()] }]
+    if (method === 'eth_call') return responseFor(params)
+    throw new Error(`Unexpected method ${method}`)
+  })
+
+  const loaded = await loadBlockData(client, 42, new Map())
+  assert.ok(loaded)
+  assert.ok(!methods.includes('eth_getLogs'))
+  assert.equal(loaded.newMeta.get(POOL)?.protocol, 'Uniswap V3')
 })

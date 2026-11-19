@@ -149,7 +149,8 @@ export async function fetchPoolMeta(
 
   const normalizedPool = poolAddress.toLowerCase()
   const state = getResolverState(client)
-  const key = `${normalizedPool}:${blockTag}`
+  // token0/token1/factory never change, so concurrent lookups at different blocks can share one.
+  const key = normalizedPool
   const existing = state.inFlight.get(key)
   if (existing) return existing
 

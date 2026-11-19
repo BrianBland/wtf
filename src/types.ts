@@ -37,6 +37,7 @@ export interface RawReceipt {
   l1Fee?: string
   status?: string
   contractAddress?: string | null
+  logs?: RawLog[]
 }
 
 export interface RawLog {

@@ -316,15 +316,29 @@ export const useStore = create<Store>((set, get) => ({
       set({ connError: msg })
     }
 
+    // One retry covers rate-limit errors and load-balanced RPCs that announce a head
+    // before every node can serve it; otherwise the block is a permanent hole in the feed.
     const fetchAndStoreBlock = async (blockNumber: number) => {
-      try {
-        const loaded = await loadBlockData(client, blockNumber, get().poolCache, get().v4PoolKeyCache)
-        if (!loaded || !isCurrentClient()) return
-        applyPoolMeta(set, loaded.newMeta)
-        applyV4PoolKeys(set, loaded.newV4PoolKeys)
-        get().addBlock(loaded.block)
-      } catch (e) {
-        console.warn(`Block ${blockNumber} fetch failed:`, e)
+      for (let attempt = 1; attempt <= 2; attempt++) {
+        try {
+          const loaded = await loadBlockData(client, blockNumber, get().poolCache, get().v4PoolKeyCache)
+          if (!isCurrentClient()) return
+          if (loaded) {
+            applyPoolMeta(set, loaded.newMeta)
+            applyV4PoolKeys(set, loaded.newV4PoolKeys)
+            get().addBlock(loaded.block)
+            // Concurrent fetches can finish out of order at 5 blocks/s.
+            set((s) => ({
+              latestBlock: Math.max(s.latestBlock ?? 0, blockNumber),
+              ...(loaded.block.eip1559 && { chainElasticity: loaded.block.eip1559.elasticity }),
+            }))
+            return
+          }
+        } catch (e) {
+          if (attempt === 2) console.warn(`Block ${blockNumber} fetch failed:`, e)
+        }
+        if (attempt === 1) await new Promise((r) => setTimeout(r, 500))
+        if (!isCurrentClient()) return
       }
     }
 
@@ -347,29 +361,16 @@ export const useStore = create<Store>((set, get) => ({
       await client.subscribe<{ number: string; hash: string }>(
         'newHeads', null, async (header) => {
           if (!isCurrentClient()) return
-          try {
-            const blockNumber = parseInt(header.number, 16)
-            // Backfill blocks missed during initial sync or a dropped subscription.
-            // Tracks headers seen, not blocks loaded, so in-flight blocks aren't fetched twice.
-            if (highestHeader !== null) {
-              for (let n = Math.max(highestHeader + 1, blockNumber - MAX_GAP_FILL); n < blockNumber; n++) {
-                void fetchAndStoreBlock(n)
-              }
+          const blockNumber = parseInt(header.number, 16)
+          // Backfill blocks missed during initial sync or a dropped subscription.
+          // Tracks headers seen, not blocks loaded, so in-flight blocks aren't fetched twice.
+          if (highestHeader !== null) {
+            for (let n = Math.max(highestHeader + 1, blockNumber - MAX_GAP_FILL); n < blockNumber; n++) {
+              void fetchAndStoreBlock(n)
             }
-            highestHeader = Math.max(highestHeader ?? 0, blockNumber)
-            const loaded = await loadBlockData(client, blockNumber, get().poolCache, get().v4PoolKeyCache)
-            if (!loaded || !isCurrentClient()) return
-            applyPoolMeta(set, loaded.newMeta)
-            applyV4PoolKeys(set, loaded.newV4PoolKeys)
-            get().addBlock(loaded.block)
-            // Concurrent fetches can finish out of order at 5 blocks/s.
-            set((s) => ({
-              latestBlock: Math.max(s.latestBlock ?? 0, loaded.block.number),
-              ...(loaded.block.eip1559 && { chainElasticity: loaded.block.eip1559.elasticity }),
-            }))
-          } catch (e) {
-            console.error('Block fetch error', header.number, e)
           }
+          highestHeader = Math.max(highestHeader ?? 0, blockNumber)
+          await fetchAndStoreBlock(blockNumber)
         }
       )
     } catch (e) {
@@ -387,9 +388,7 @@ export const useStore = create<Store>((set, get) => ({
         Array.from({ length: n - chunkStart + 1 }, (_, i) => fetchAndStoreBlock(chunkStart + i))
       )
       // Show the newest blocks while older ones keep loading.
-      if (n === head && isCurrentClient()) {
-        set((s) => ({ initialized: true, latestBlock: Math.max(s.latestBlock ?? 0, head) }))
-      }
+      if (n === head && isCurrentClient()) set({ initialized: true })
     }
     if (!isCurrentClient()) return
     // Estimate EIP-1559 elasticity from the initial block sample
