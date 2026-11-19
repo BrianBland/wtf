@@ -5,7 +5,7 @@ import { DEPOSIT_TX_TYPE } from './txMetrics'
 export const DEPOSITOR_ACCOUNT = '0xdeaddeaddeaddeaddeaddeaddeaddeaddead0001'
 export const L1_BLOCK_ADDRESS  = '0x4200000000000000000000000000000000000015'
 export const BASE_TIME_ADDRESS = '0x4200000000000000000000000000000000000030'
-export const SET_TIMESTAMP_MILLIS_PART_SELECTOR = '0x86bdf394'
+const SET_TIMESTAMP_MILLIS_PART_SELECTOR = '0x86bdf394'
 
 /** Base predeploys and native precompiles, for address labels. */
 export const BASE_SYSTEM_CONTRACTS: Record<string, string> = {

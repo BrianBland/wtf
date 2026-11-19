@@ -1,6 +1,6 @@
 import { Block } from '../types'
 
-export interface NetFlow {
+interface NetFlow {
   token: string    // contract address or 'ETH'
   sent: bigint
   received: bigint

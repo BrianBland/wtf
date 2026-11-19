@@ -171,7 +171,7 @@ export interface CallTrace {
 }
 
 // UI navigation
-export type ViewType = 'config' | 'range' | 'block' | 'tx'
+type ViewType = 'config' | 'range' | 'block' | 'tx'
 
 export interface BlockHistogramFilter {
   sender: string | null
